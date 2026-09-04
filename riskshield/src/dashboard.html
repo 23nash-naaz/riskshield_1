@@ -684,22 +684,18 @@ input[type="range"]::-webkit-slider-thumb {
 
     <!-- Right Sidebar -->
     <aside class="sidebar">
-      <!-- Margin Slider -->
+      <!-- Risk Policy -->
       <div class="panel">
-        <div class="panel-header"><h2>Merchant Economics</h2></div>
+        <div class="panel-header"><h2>Risk Policy Controls</h2></div>
         <div class="slider-block">
           <div class="slider-top">
             <span>Contribution margin</span>
             <strong id="mv">20%</strong>
           </div>
-          <input type="range" id="margin" min="2" max="80" value="20" aria-label="merchant margin percent">
+          <input type="range" id="margin" min="5" max="80" value="20" aria-label="merchant margin percent">
         </div>
-      </div>
-
-      <!-- Threshold Band -->
-      <div class="panel">
-        <div class="panel-header"><h2>Risk Score → Action</h2></div>
-        <div style="padding:16px 18px">
+        <div style="padding:0 18px 18px">
+          <div style="font: 600 11px var(--font); color: var(--ink-muted); text-transform: uppercase; margin-bottom: 4px;">Risk Score → Action</div>
           <div class="risk-band" id="band">
             <div class="b-allow" style="width:30%">allow</div>
             <div class="b-stepup" style="width:30%">step-up</div>
