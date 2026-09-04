@@ -4,43 +4,46 @@ The prototype is a deliberate miniature of a production risk platform. Every
 box below exists in the repo in its simplest correct form; the right column is
 the scale-out swap. Interfaces stay identical, which is the point.
 
-```
-                         PRODUCTION TOPOLOGY
-                         ===================
+```mermaid
+flowchart TD
+    MC(Merchant Checkout)
+    
+    subgraph Serving [Serving Layer]
+        GW(API GW / Auth)
+        RS(Risk Scorer<br/>stateless, N replicas)
+        DE(Decision Engine<br/>cost matrix, margins)
+    end
+    
+    subgraph Data [Data Layer]
+        OFS[(Online Feature Store<br/>Redis)]
+        EL{{Event Log<br/>Kafka}}
+        SU(Stream Updater<br/>Flink/consumer)
+    end
+    
+    subgraph Async [Async & Batch Layer]
+        CB(Chargeback Webhook<br/>30-90d + evidence)
+        OB(Offline Batch<br/>feature build, training, drift)
+        MR[(Model Registry<br/>shadow -> canary)]
+    end
 
-  merchant checkout
-        |
-        v            p99 budget: 50 ms end-to-end
-  +-----------+     +------------------+     +-----------------+
-  | API GW /  | --> |  RISK SCORER     | --> | DECISION ENGINE |---> allow
-  | auth      |     |  (stateless,     |     | (cost matrix,   |---> step-up (3DS)
-  +-----------+     |   N replicas)    |     |  per-merchant   |---> block
-                    +--------+---------+     |  margins)       |
-                             |               +--------+--------+
-                    reads    |                        |  writes decision
-                             v                        v
-                    +------------------+     +-----------------+
-                    | ONLINE FEATURE   |     | EVENT LOG       |
-                    | STORE (Redis)    |<----| (Kafka)         |
-                    | per-uid state,   |     | txns, outcomes, |
-                    | graph counters   |     | disputes        |
-                    +------------------+     +--------+--------+
-                                                      |
-                             +------------------------+------------+
-                             v                                     v
-                    +------------------+                  +-----------------+
-                    | STREAM UPDATER   |                  | OFFLINE (batch) |
-                    | (Flink/consumer) |                  | feature build,  |
-                    | folds each txn   |                  | training, calib,|
-                    | into store state |                  | drift audit     |
-                    +------------------+                  +--------+--------+
-                                                                   |
-                    +------------------+                  registry | monthly
-                    | CHARGEBACK       |                           v
-                    | WEBHOOK (30-90d) |---> labels ---> +-----------------+
-                    | + evidence pack  |                 | MODEL REGISTRY  |
-                    | generator        |                 | shadow -> canary|
-                    +------------------+                 +-----------------+
+    MC -->|p99 budget: 50ms e2e| GW
+    GW --> RS
+    RS --> DE
+    
+    DE -->|allow| Allow([Allow])
+    DE -->|step-up| 3DS([3DS Step-up])
+    DE -->|block| Block([Block])
+    
+    RS -.->|reads| OFS
+    DE -->|writes decision| EL
+    
+    EL --> SU
+    SU -->|folds txn into state| OFS
+    EL --> OB
+    
+    CB -->|labels| OB
+    OB -->|monthly| MR
+    MR -.->|model updates| RS
 ```
 
 ## Prototype -> production mapping
