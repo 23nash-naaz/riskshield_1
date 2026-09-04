@@ -1,0 +1,33 @@
+{
+  "pr_auc_cal": 0.9428813147127382,
+  "pr_auc_raw": 0.9865523892290867,
+  "ci": [
+    0.9016197003258066,
+    0.9745107775055907
+  ],
+  "precision": 0.9576923076923077,
+  "recall": 0.9841897233201581,
+  "fp_per_1k_good": 0.927956807828581,
+  "review_rate": 0.02147517964813744,
+  "pct_stepup": 0.0,
+  "pct_block": 0.02147517964813744,
+  "rupees": {
+    "model": 1238.9668896164553,
+    "allow_all": 96657.0030100469,
+    "block_all": 156990.1401341393,
+    "rule_amount": 57707.45141578434,
+    "stepup_all": 24224.911511735725
+  },
+  "drift_auc": 0.9887328733213647,
+  "dropped": [
+    "f_dt_ratio",
+    "h_n_prev"
+  ],
+  "return_metrics": {
+    "pr_auc": 0.994,
+    "n_test": 3426,
+    "n_abusive_test": 575,
+    "abuse_rate": 0.1678,
+    "avg_abuse_cost_inr": 437.0
+  }
+}

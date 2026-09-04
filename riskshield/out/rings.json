@@ -1,0 +1,223 @@
+[
+  {
+    "ring_id": 0,
+    "n_accounts": 8647,
+    "n_transactions": 29056,
+    "n_fraud": 885,
+    "fraud_rate": 0.0305,
+    "n_devices": 2764,
+    "n_emails": 60,
+    "n_bins": 400,
+    "device_concentration": 3.13,
+    "total_amount_inr": 24209443.0,
+    "avg_amount_inr": 833.0,
+    "shared_devices": [
+      "72",
+      "1467",
+      "2674",
+      "2817",
+      "2995"
+    ],
+    "shared_emails": [
+      "32",
+      "26",
+      "11",
+      "56",
+      "58"
+    ],
+    "sample_uids": [
+      "17328|296|-17",
+      "11984|414|-327",
+      "6651|353|-395",
+      "7499|129|-31",
+      "15447|436|-381",
+      "17939|222|1019",
+      "2676|195|-150",
+      "14802|254|-250"
+    ],
+    "edges": [
+      {
+        "source": "8767|451|-11",
+        "target": "2727",
+        "source_type": "account",
+        "target_type": "DeviceInfo"
+      },
+      {
+        "source": "8767|451|-11",
+        "target": "49",
+        "source_type": "account",
+        "target_type": "P_emaildomain"
+      },
+      {
+        "source": "8767|451|-11",
+        "target": "383",
+        "source_type": "account",
+        "target_type": "card_bin"
+      },
+      {
+        "source": "2727",
+        "target": "5529|121|-70",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "2727",
+        "target": "3026|249|-35",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "2727",
+        "target": "7940|519|-25",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "2727",
+        "target": "2099|518|-12",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "2727",
+        "target": "9722|511|-26",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "2727",
+        "target": "5529|121|104",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "2727",
+        "target": "7940|519|105",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "15481|332|-1",
+        "target": "324",
+        "source_type": "account",
+        "target_type": "DeviceInfo"
+      },
+      {
+        "source": "15481|332|-1",
+        "target": "5",
+        "source_type": "account",
+        "target_type": "P_emaildomain"
+      },
+      {
+        "source": "15481|332|-1",
+        "target": "285",
+        "source_type": "account",
+        "target_type": "card_bin"
+      },
+      {
+        "source": "324",
+        "target": "5913|406|-12",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "324",
+        "target": "2971|361|55",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "324",
+        "target": "14568|275|-2",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "12721|448|-2",
+        "target": "949",
+        "source_type": "account",
+        "target_type": "DeviceInfo"
+      },
+      {
+        "source": "12721|448|-2",
+        "target": "46",
+        "source_type": "account",
+        "target_type": "P_emaildomain"
+      },
+      {
+        "source": "12721|448|-2",
+        "target": "328",
+        "source_type": "account",
+        "target_type": "card_bin"
+      },
+      {
+        "source": "1170|247|-30",
+        "target": "1740",
+        "source_type": "account",
+        "target_type": "DeviceInfo"
+      },
+      {
+        "source": "1170|247|-30",
+        "target": "27",
+        "source_type": "account",
+        "target_type": "P_emaildomain"
+      },
+      {
+        "source": "1170|247|-30",
+        "target": "345",
+        "source_type": "account",
+        "target_type": "card_bin"
+      },
+      {
+        "source": "3298|201|-32",
+        "target": "2600",
+        "source_type": "account",
+        "target_type": "DeviceInfo"
+      },
+      {
+        "source": "3298|201|-32",
+        "target": "44",
+        "source_type": "account",
+        "target_type": "P_emaildomain"
+      },
+      {
+        "source": "3298|201|-32",
+        "target": "267",
+        "source_type": "account",
+        "target_type": "card_bin"
+      },
+      {
+        "source": "2600",
+        "target": "13061|424|-2",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "2600",
+        "target": "10768|265|10",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "2600",
+        "target": "10768|265|-1",
+        "source_type": "DeviceInfo",
+        "target_type": "account"
+      },
+      {
+        "source": "3038|273|-20",
+        "target": "1827",
+        "source_type": "account",
+        "target_type": "DeviceInfo"
+      },
+      {
+        "source": "3038|273|-20",
+        "target": "29",
+        "source_type": "account",
+        "target_type": "P_emaildomain"
+      }
+    ],
+    "score": 1.0,
+    "severity": "CRITICAL"
+  }
+]

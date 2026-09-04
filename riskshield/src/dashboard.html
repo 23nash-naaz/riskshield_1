@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RiskShield — AI Risk Manager Console</title>
+<meta name="description" content="Rupee-optimal chargeback, return, and abuse-ring defense for Indian merchants. Real-time scoring with measured precision, recall, and false-positive cost.">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ========== DESIGN TOKENS ========== */
+:root {
+  --bg-base: #0a0e1a;
+  --bg-surface: #111827;
+  --bg-elevated: #1a2235;
+  --bg-glass: rgba(17, 24, 39, 0.65);
+  --border: rgba(99, 115, 155, 0.18);
+  --border-bright: rgba(99, 115, 155, 0.35);
+
+  --ink: #e8ecf4;
+  --ink-muted: #7b8aa6;
+  --ink-dim: #4a5568;
+
+  --accent: #3b82f6;
+  --accent-glow: rgba(59, 130, 246, 0.25);
+  --gold: #f59e0b;
+  --gold-glow: rgba(245, 158, 11, 0.2);
+
+  --allow: #10b981;
+  --allow-bg: rgba(16, 185, 129, 0.12);
+  --stepup: #f59e0b;
+  --stepup-bg: rgba(245, 158, 11, 0.12);
+  --block: #ef4444;
+  --block-bg: rgba(239, 68, 68, 0.12);
+
+  --critical: #ef4444;
+  --high: #f59e0b;
+  --medium: #3b82f6;
+  --low: #6b7280;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+}
+
+/* ========== RESET & BASE ========== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; -webkit-font-smoothing: antialiased; }
+body {
+  background: var(--bg-base);
+  color: var(--ink);
+  font-family: var(--font);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Background gradient orbs */
+body::before {
+  content: '';
+  position: fixed;
+  top: -20%; left: -10%;
+  width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+body::after {
+  content: '';
+  position: fixed;
+  bottom: -15%; right: -5%;
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(245,158,11,0.06) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ========== HEADER ========== */
+.topbar {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 24px;
+  background: rgba(10, 14, 26, 0.85);
+  backdrop-filter: blur(20px) saturate(1.5);
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  display: flex; align-items: center; gap: 12px;
+}
+.brand-icon {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, var(--accent), #8b5cf6);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 800; color: #fff;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3);
+}
+.brand-text .eyebrow {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--accent);
+}
+.brand-text h1 {
+  font-size: 17px; font-weight: 700; letter-spacing: -0.01em;
+  background: linear-gradient(135deg, #e8ecf4, #93a5c4);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+.tab-nav {
+  display: flex; gap: 2px; margin-left: 24px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  border: 1px solid var(--border);
+}
+.tab-btn {
+  padding: 7px 16px;
+  font: 600 11px/1 var(--font);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  border: none; background: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tab-btn:hover { color: var(--ink); }
+.tab-btn.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+.tab-btn.ring-tab.active {
+  background: linear-gradient(135deg, #ef4444, #f59e0b);
+}
+
+.spacer { flex: 1; }
+
+.controls { display: flex; align-items: center; gap: 12px; }
+.selector {
+  display: flex; align-items: center; gap: 6px;
+  font: 500 11px var(--font); color: var(--ink-muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.selector select {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  padding: 5px 8px;
+  font: 500 12px var(--mono);
+  border-radius: var(--radius-xs);
+}
+.btn-primary {
+  padding: 8px 20px;
+  font: 600 12px var(--font);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  border: none;
+  background: linear-gradient(135deg, var(--accent), #6366f1);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  box-shadow: 0 2px 12px rgba(59, 130, 246, 0.3);
+  transition: all 0.2s;
+}
+.btn-primary:hover {
+  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+  transform: translateY(-1px);
+}
+
+/* ========== KPI STRIP ========== */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: 2fr repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.kpi {
+  padding: 18px 24px;
+  background: var(--bg-base);
+}
+.kpi .label {
+  font: 600 10px var(--font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin-bottom: 6px;
+}
+.kpi .value {
+  font: 700 28px var(--mono);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.kpi.hero .value {
+  font-size: 38px;
+  background: linear-gradient(135deg, var(--gold), #fbbf24);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 8px var(--gold-glow));
+}
+
+/* ========== MAIN LAYOUT ========== */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  min-height: calc(100vh - 160px);
+}
+
+.tab-content { display: none; }
+.tab-content.active { display: contents; }
+
+/* ========== GLASS PANEL ========== */
+.panel {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-header h2 {
+  font: 600 11px var(--font);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.panel-header .badge {
+  font: 500 10px var(--mono);
+  padding: 3px 8px;
+  border-radius: 20px;
+  background: var(--accent-glow);
+  color: var(--accent);
+  border: 1px solid rgba(59,130,246,0.2);
+}
+
+/* ========== DECISION TAPE ========== */
+.tape-section {
+  padding: 20px 24px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  max-height: calc(100vh - 160px);
+}
+.tape-section .panel { margin-bottom: 16px; }
+.tape-list { max-height: 480px; overflow-y: auto; }
+
+.tape-row {
+  display: grid;
+  grid-template-columns: 80px 95px 80px 1fr 22px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  font: 400 13px var(--mono);
+  animation: slideIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background 0.15s;
+}
+.tape-row:hover { background: rgba(59, 130, 246, 0.04); }
+@keyframes slideIn {
+  from { transform: translateY(-12px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.tape-row .txn-id { color: var(--ink-dim); font-size: 12px; }
+.tape-row .amt { font-weight: 600; }
+
+.pill {
+  font: 600 10px var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+.pill.allow { background: var(--allow-bg); color: var(--allow); }
+.pill.stepup { background: var(--stepup-bg); color: var(--stepup); }
+.pill.block { background: var(--block-bg); color: var(--block); }
+
+.reason-code {
+  color: var(--ink-muted);
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fraud-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  justify-self: center;
+  transition: all 0.3s;
+}
+.fraud-dot.fraud {
+  background: var(--block);
+  box-shadow: 0 0 10px var(--block), 0 0 20px rgba(239,68,68,0.3);
+  animation: fraudPulse 2s infinite;
+}
+.fraud-dot.safe { background: var(--ink-dim); opacity: 0.4; }
+@keyframes fraudPulse {
+  0%, 100% { box-shadow: 0 0 6px var(--block); }
+  50% { box-shadow: 0 0 14px var(--block), 0 0 28px rgba(239,68,68,0.4); }
+}
+
+/* ========== CONFUSION MATRIX ========== */
+.confusion-grid {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  grid-template-rows: auto 1fr 1fr;
+  gap: 2px;
+  padding: 18px;
+  font: 500 12px var(--font);
+}
+.confusion-grid .corner { }
+.confusion-grid .col-label, .confusion-grid .row-label {
+  font: 600 10px var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  display: flex; align-items: center; justify-content: center;
+  padding: 8px;
+}
+.confusion-grid .cell {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 14px;
+  border-radius: var(--radius-xs);
+  transition: all 0.3s;
+}
+.confusion-grid .cell .num {
+  font: 700 22px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.confusion-grid .cell .sub {
+  font: 500 10px var(--font);
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+.cell.tp { background: rgba(16,185,129,0.15); color: var(--allow); }
+.cell.fp { background: rgba(245,158,11,0.12); color: var(--stepup); }
+.cell.fn { background: rgba(239,68,68,0.12); color: var(--block); }
+.cell.tn { background: rgba(99,115,155,0.08); color: var(--ink-muted); }
+
+/* ========== SIDEBAR ========== */
+.sidebar {
+  padding: 20px;
+  overflow-y: auto;
+  max-height: calc(100vh - 160px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Slider */
+.slider-block {
+  padding: 16px 18px;
+}
+.slider-top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 10px;
+}
+.slider-top span { font: 500 12px var(--font); color: var(--ink-muted); }
+.slider-top strong {
+  font: 700 16px var(--mono);
+  color: var(--gold);
+}
+input[type="range"] {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: var(--bg-surface);
+  border-radius: 3px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px; height: 18px;
+  background: linear-gradient(135deg, var(--accent), #6366f1);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(59,130,246,0.4);
+}
+
+/* Risk band */
+.risk-band {
+  display: flex;
+  height: 36px;
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  margin: 8px 0 4px;
+}
+.risk-band div {
+  display: flex; align-items: center; justify-content: center;
+  font: 600 10px var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.b-allow { background: var(--allow-bg); color: var(--allow); }
+.b-stepup { background: var(--stepup-bg); color: var(--stepup); }
+.b-block { background: var(--block-bg); color: var(--block); }
+
+.scale {
+  display: flex; justify-content: space-between;
+  font: 400 10px var(--mono); color: var(--ink-dim);
+}
+
+/* Action mix bars */
+.mix-section { padding: 16px 18px; }
+.mix-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.mix-label {
+  width: 60px;
+  font: 600 10px var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.mix-label.allow { color: var(--allow); }
+.mix-label.stepup { color: var(--stepup); }
+.mix-label.block { color: var(--block); }
+.mix-track {
+  flex: 1; height: 8px;
+  background: var(--bg-surface);
+  border-radius: 4px; overflow: hidden;
+}
+.mix-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+.mix-fill.allow { background: linear-gradient(90deg, var(--allow), #34d399); }
+.mix-fill.stepup { background: linear-gradient(90deg, var(--stepup), #fbbf24); }
+.mix-fill.block { background: linear-gradient(90deg, var(--block), #f87171); }
+.mix-pct {
+  width: 48px; text-align: right;
+  font: 500 12px var(--mono);
+  color: var(--ink-muted);
+}
+
+/* Insight box */
+.insight-box {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(59, 130, 246, 0.04);
+  font: 400 12px/1.6 var(--font);
+  color: var(--ink-muted);
+}
+.insight-box b { color: var(--ink); }
+
+/* ========== ABLATION CHART (SVG) ========== */
+.ablation-section { padding: 18px; }
+.ablation-bar-group {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 10px;
+}
+.ablation-label {
+  width: 130px;
+  font: 500 11px var(--font);
+  color: var(--ink-muted);
+  text-align: right;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.ablation-track {
+  flex: 1; height: 24px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+  position: relative;
+}
+.ablation-fill {
+  height: 100%;
+  border-radius: var(--radius-xs);
+  background: linear-gradient(90deg, var(--accent), #8b5cf6);
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 8px;
+  font: 600 11px var(--mono);
+  color: #fff;
+  min-width: 50px;
+}
+.ablation-cost {
+  width: 90px;
+  font: 500 11px var(--mono);
+  color: var(--gold);
+  text-align: right;
+}
+
+/* ========== RINGS TAB ========== */
+.rings-grid {
+  padding: 24px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.ring-card {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  transition: all 0.2s;
+}
+.ring-card:hover {
+  border-color: var(--border-bright);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.ring-top {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.ring-id {
+  font: 700 14px var(--font);
+  color: var(--ink);
+}
+.severity-badge {
+  font: 600 10px var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+.severity-badge.CRITICAL { background: rgba(239,68,68,0.15); color: var(--critical); }
+.severity-badge.HIGH { background: rgba(245,158,11,0.15); color: var(--high); }
+.severity-badge.MEDIUM { background: rgba(59,130,246,0.15); color: var(--medium); }
+.severity-badge.LOW { background: rgba(107,114,128,0.15); color: var(--low); }
+
+.ring-stats {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px; margin-bottom: 14px;
+}
+.ring-stat {
+  font: 400 11px var(--font); color: var(--ink-muted);
+}
+.ring-stat strong {
+  display: block;
+  font: 600 15px var(--mono);
+  color: var(--ink);
+  margin-top: 2px;
+}
+
+.ring-graph-area {
+  background: var(--bg-base);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  min-height: 120px;
+  display: flex; align-items: center; justify-content: center;
+}
+.ring-graph-area svg { width: 100%; height: 120px; }
+
+/* ========== EMPTY STATE ========== */
+.empty-state {
+  padding: 40px;
+  text-align: center;
+  color: var(--ink-dim);
+  font: 500 13px var(--font);
+}
+
+/* ========== RESPONSIVE ========== */
+@media (max-width: 900px) {
+  .main-grid { grid-template-columns: 1fr; }
+  .kpi-strip { grid-template-columns: 1fr 1fr; }
+  .rings-grid { grid-template-columns: 1fr; }
+  .tab-nav { display: none; }
+  .tape-section { border-right: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tape-row { animation: none; }
+  * { transition: none !important; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--ink-dim); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ====== HEADER ====== -->
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-icon">R</div>
+    <div class="brand-text">
+      <div class="eyebrow">AI Risk Manager · Track 02</div>
+      <h1>RiskShield</h1>
+    </div>
+  </div>
+
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="chargeback">Chargeback Shield</button>
+    <button class="tab-btn ring-tab" data-tab="rings">Abuse Rings</button>
+  </nav>
+
+  <div class="spacer"></div>
+
+  <div class="controls">
+    <label class="selector">
+      <span>Speed</span>
+      <select id="speed">
+        <option value="900">Slow</option>
+        <option value="400" selected>Normal</option>
+        <option value="120">Fast</option>
+        <option value="40">Turbo</option>
+      </select>
+    </label>
+    <button class="btn-primary" id="toggle">▶ Start Replay</button>
+  </div>
+</header>
+
+<!-- ====== KPI STRIP ====== -->
+<section class="kpi-strip">
+  <div class="kpi hero">
+    <div class="label">₹ Saved vs Allow-All</div>
+    <div class="value" id="saved">₹0</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Processed</div>
+    <div class="value" id="n">0</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Precision</div>
+    <div class="value" id="prec">—</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Recall</div>
+    <div class="value" id="rec">—</div>
+  </div>
+  <div class="kpi">
+    <div class="label">FP / 1k Good</div>
+    <div class="value" id="fpk">—</div>
+  </div>
+</section>
+
+<!-- ====== CHARGEBACK TAB ====== -->
+<div class="tab-content active" id="tab-chargeback">
+  <div class="main-grid">
+
+    <!-- Left: Tape + Ablation + Confusion -->
+    <div class="tape-section">
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-header">
+          <h2>Decision Tape — Held-out Future Window</h2>
+          <span class="badge" id="replay-badge">Live</span>
+        </div>
+        <div class="tape-list" id="rows"></div>
+        <div class="empty-state" id="empty-state">Press ▶ Start Replay to stream held-out transactions</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <!-- Confusion Matrix -->
+        <div class="panel">
+          <div class="panel-header"><h2>Confusion Matrix</h2></div>
+          <div class="confusion-grid">
+            <div class="corner"></div>
+            <div class="col-label">Predicted +</div>
+            <div class="col-label">Predicted −</div>
+            <div class="row-label">Actual +</div>
+            <div class="cell tp"><span class="num" id="cm-tp">0</span><span class="sub">TP</span></div>
+            <div class="cell fn"><span class="num" id="cm-fn">0</span><span class="sub">FN</span></div>
+            <div class="row-label">Actual −</div>
+            <div class="cell fp"><span class="num" id="cm-fp">0</span><span class="sub">FP</span></div>
+            <div class="cell tn"><span class="num" id="cm-tn">0</span><span class="sub">TN</span></div>
+          </div>
+        </div>
+
+        <!-- Ablation Chart -->
+        <div class="panel">
+          <div class="panel-header"><h2>Ablation Study</h2></div>
+          <div class="ablation-section" id="ablation-chart">
+            <div class="empty-state" style="padding:20px;font-size:11px">Loading...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Sidebar -->
+    <aside class="sidebar">
+      <!-- Margin Slider -->
+      <div class="panel">
+        <div class="panel-header"><h2>Merchant Economics</h2></div>
+        <div class="slider-block">
+          <div class="slider-top">
+            <span>Contribution margin</span>
+            <strong id="mv">20%</strong>
+          </div>
+          <input type="range" id="margin" min="2" max="80" value="20" aria-label="merchant margin percent">
+        </div>
+      </div>
+
+      <!-- Threshold Band -->
+      <div class="panel">
+        <div class="panel-header"><h2>Risk Score → Action</h2></div>
+        <div style="padding:16px 18px">
+          <div class="risk-band" id="band">
+            <div class="b-allow" style="width:30%">allow</div>
+            <div class="b-stepup" style="width:30%">step-up</div>
+            <div class="b-block" style="width:40%">block</div>
+          </div>
+          <div class="scale"><span>0.0</span><span>0.5</span><span>1.0</span></div>
+        </div>
+      </div>
+
+      <!-- Action Mix -->
+      <div class="panel">
+        <div class="panel-header"><h2>Action Mix</h2></div>
+        <div class="mix-section">
+          <div class="mix-row">
+            <span class="mix-label allow">allow</span>
+            <div class="mix-track"><div class="mix-fill allow" id="ba" style="width:0%"></div></div>
+            <span class="mix-pct" id="pa">0%</span>
+          </div>
+          <div class="mix-row">
+            <span class="mix-label stepup">step-up</span>
+            <div class="mix-track"><div class="mix-fill stepup" id="bs" style="width:0%"></div></div>
+            <span class="mix-pct" id="ps">0%</span>
+          </div>
+          <div class="mix-row">
+            <span class="mix-label block">block</span>
+            <div class="mix-track"><div class="mix-fill block" id="bb" style="width:0%"></div></div>
+            <span class="mix-pct" id="pb">0%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Insight -->
+      <div class="insight-box">
+        <b>Why three actions?</b> Step-up (3DS/OTP) converts a false positive from <b>lost sale</b>
+        into <b>3 seconds of friction</b>. Drag the margin slider: a <b>5% electronics merchant</b>
+        can't afford blocked sales; a <b>60% SaaS merchant</b> can tolerate aggressive blocking.
+        Thresholds are <b>derived from the cost matrix</b>, not tuned.<br><br>
+        Red dots = confirmed chargebacks from held-out labels, revealed <b>after</b> the decision.
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- ====== RINGS TAB ====== -->
+<div class="tab-content" id="tab-rings">
+  <div class="rings-grid" id="rings-container">
+    <div class="empty-state" style="grid-column:1/-1;padding:60px">Loading abuse-ring data...</div>
+  </div>
+</div>
+
+<script>
+/* ========== STATE ========== */
+const $ = id => document.getElementById(id);
+let timer = null, mix = {allow:0, stepup:0, block:0}, total = 0;
+let cm = {tp:0, fp:0, fn:0, tn:0};
+const inr = v => '₹' + Math.round(v).toLocaleString('en-IN');
+
+/* ========== TABS ========== */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+/* ========== REPLAY ENGINE ========== */
+async function step() {
+  const r = await fetch('/simulate/step?n=1', {method:'POST'});
+  const d = await r.json();
+  if (!d.events.length) {
+    stop();
+    $('toggle').textContent = '✓ Replay Finished';
+    $('replay-badge').textContent = 'Done';
+    return;
+  }
+  for (const e of d.events) addRow(e);
+  const s = d.stats;
+  animateValue('saved', inr(s.rupees_saved));
+  $('n').textContent = s.processed.toLocaleString('en-IN');
+  $('prec').textContent = s.precision.toFixed(3);
+  $('rec').textContent = s.recall.toFixed(3);
+  $('fpk').textContent = s.fp_per_1k_good.toFixed(2);
+}
+
+function animateValue(id, newText) {
+  const el = $(id);
+  el.textContent = newText;
+  el.style.transform = 'scale(1.05)';
+  setTimeout(() => el.style.transform = 'scale(1)', 150);
+}
+
+function addRow(e) {
+  $('empty-state').style.display = 'none';
+  total++;
+  mix[e.action]++;
+
+  // Update confusion matrix
+  const flag = e.action !== 'allow';
+  const fraud = !!e.true_fraud;
+  if (flag && fraud) cm.tp++;
+  else if (flag && !fraud) cm.fp++;
+  else if (!flag && fraud) cm.fn++;
+  else cm.tn++;
+  $('cm-tp').textContent = cm.tp;
+  $('cm-fp').textContent = cm.fp;
+  $('cm-fn').textContent = cm.fn;
+  $('cm-tn').textContent = cm.tn;
+
+  const div = document.createElement('div');
+  div.className = 'tape-row';
+  div.innerHTML = `
+    <span class="txn-id">#${e.txn_id}</span>
+    <span class="amt">${inr(e.amount)}</span>
+    <span class="pill ${e.action}">${e.action}</span>
+    <span class="reason-code">${e.reason_codes.join(' · ')}</span>
+    <span class="fraud-dot ${e.true_fraud ? 'fraud' : 'safe'}"
+          title="${e.true_fraud ? 'Confirmed chargeback' : 'Clean'}"></span>`;
+  const rows = $('rows');
+  rows.prepend(div);
+  while (rows.children.length > 50) rows.lastChild.remove();
+
+  for (const [a, el, pl] of [['allow','ba','pa'],['stepup','bs','ps'],['block','bb','pb']]) {
+    const p = 100 * mix[a] / total;
+    $(el).style.width = p + '%';
+    $(pl).textContent = p.toFixed(1) + '%';
+  }
+}
+
+function start() {
+  timer = setInterval(step, +$('speed').value);
+  $('toggle').textContent = '⏸ Pause';
+  $('replay-badge').textContent = 'Live';
+}
+function stop() {
+  clearInterval(timer);
+  timer = null;
+  $('toggle').textContent = '▶ Resume';
+  $('replay-badge').textContent = 'Paused';
+}
+$('toggle').onclick = () => timer ? stop() : start();
+$('speed').onchange = () => { if (timer) { stop(); start(); } };
+
+/* ========== MARGIN SLIDER ========== */
+$('margin').oninput = async ev => {
+  const m = ev.target.value / 100;
+  $('mv').textContent = ev.target.value + '%';
+  const r = await fetch('/margin?margin=' + m, {method:'POST'});
+  const t = (await r.json()).thresholds;
+  const su = t.stepup ?? t.block ?? 1, bl = t.block ?? 1;
+  const b = $('band').children;
+  b[0].style.width = (su * 100) + '%';
+  b[1].style.width = ((bl - su) * 100) + '%';
+  b[2].style.width = ((1 - bl) * 100) + '%';
+};
+$('margin').dispatchEvent(new Event('input'));
+
+/* ========== ABLATION CHART ========== */
+async function loadAblation() {
+  try {
+    const r = await fetch('/ablation');
+    const d = await r.json();
+    if (!d.stages || !d.stages.length) return;
+    const el = $('ablation-chart');
+    const maxAP = Math.max(...d.stages.map(s => s.PR_AUC_raw));
+    el.innerHTML = d.stages.map(s => {
+      const pct = (s.PR_AUC_raw / maxAP * 100);
+      return `
+        <div class="ablation-bar-group">
+          <div class="ablation-label" title="${s.stage}">${s.stage}</div>
+          <div class="ablation-track">
+            <div class="ablation-fill" style="width:${pct}%">${s.PR_AUC_raw.toFixed(3)}</div>
+          </div>
+          <div class="ablation-cost">₹${Math.round(s.rupees_per_1k).toLocaleString('en-IN')}/1k</div>
+        </div>`;
+    }).join('');
+  } catch(e) { /* silent */ }
+}
+loadAblation();
+
+/* ========== RINGS ========== */
+async function loadRings() {
+  try {
+    const r = await fetch('/rings');
+    const d = await r.json();
+    if (!d.rings || !d.rings.length) {
+      $('rings-container').innerHTML =
+        '<div class="empty-state" style="grid-column:1/-1;padding:60px">No abuse rings detected above threshold</div>';
+      return;
+    }
+    $('rings-container').innerHTML = d.rings.map(ring => `
+      <div class="ring-card">
+        <div class="ring-top">
+          <span class="ring-id">Ring #${ring.ring_id}</span>
+          <span class="severity-badge ${ring.severity}">${ring.severity}</span>
+        </div>
+        <div class="ring-stats">
+          <div class="ring-stat">Accounts<strong>${ring.n_accounts}</strong></div>
+          <div class="ring-stat">Fraud txns<strong>${ring.n_fraud}</strong></div>
+          <div class="ring-stat">Fraud rate<strong>${(ring.fraud_rate*100).toFixed(1)}%</strong></div>
+          <div class="ring-stat">Dev. conc.<strong>${ring.device_concentration}×</strong></div>
+          <div class="ring-stat">Devices<strong>${ring.n_devices}</strong></div>
+          <div class="ring-stat">Total ₹<strong>${inr(ring.total_amount_inr)}</strong></div>
+        </div>
+        <div class="ring-graph-area">
+          ${renderRingGraph(ring)}
+        </div>
+      </div>
+    `).join('');
+  } catch(e) {
+    $('rings-container').innerHTML =
+      '<div class="empty-state" style="grid-column:1/-1;padding:60px">Run python run.py first to detect rings</div>';
+  }
+}
+
+function renderRingGraph(ring) {
+  if (!ring.edges || !ring.edges.length) return '<span style="color:var(--ink-dim);font-size:11px">No graph data</span>';
+
+  // Force-directed layout (simplified)
+  const nodes = new Map();
+  ring.edges.forEach(e => {
+    if (!nodes.has(e.source)) nodes.set(e.source, {id: e.source, type: e.source_type});
+    if (!nodes.has(e.target)) nodes.set(e.target, {id: e.target, type: e.target_type});
+  });
+
+  const W = 280, H = 110;
+  const nodeArr = [...nodes.values()];
+  const n = nodeArr.length;
+
+  // Circular layout
+  nodeArr.forEach((nd, i) => {
+    const angle = (2 * Math.PI * i) / n;
+    nd.x = W/2 + (W/2 - 30) * Math.cos(angle) * 0.8;
+    nd.y = H/2 + (H/2 - 20) * Math.sin(angle) * 0.8;
+  });
+
+  const nodeMap = new Map(nodeArr.map(n => [n.id, n]));
+  const typeColors = {
+    account: 'var(--accent)',
+    DeviceInfo: 'var(--block)',
+    P_emaildomain: 'var(--stepup)',
+    card_bin: 'var(--allow)',
+  };
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+
+  // Edges
+  ring.edges.forEach(e => {
+    const s = nodeMap.get(e.source), t = nodeMap.get(e.target);
+    if (s && t) {
+      svg += `<line x1="${s.x}" y1="${s.y}" x2="${t.x}" y2="${t.y}"
+        stroke="var(--border-bright)" stroke-width="1" opacity="0.6"/>`;
+    }
+  });
+
+  // Nodes
+  nodeArr.forEach(nd => {
+    const color = typeColors[nd.type] || 'var(--ink-dim)';
+    const r = nd.type === 'account' ? 5 : 4;
+    svg += `<circle cx="${nd.x}" cy="${nd.y}" r="${r}" fill="${color}" opacity="0.9">
+      <title>${nd.type}: ${nd.id}</title>
+    </circle>`;
+  });
+
+  svg += '</svg>';
+  return svg;
+}
+
+loadRings();
+</script>
+</body>
+</html>

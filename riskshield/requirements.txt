@@ -1,0 +1,10 @@
+lightgbm>=4.0
+scikit-learn>=1.3
+pandas>=2.0
+numpy>=1.24
+networkx>=3.0
+pyarrow>=12.0
+fastapi>=0.110
+uvicorn>=0.27
+# optional: ~2 GB. Skipping it disables only the "+ sequence embed" stage.
+torch>=2.0
