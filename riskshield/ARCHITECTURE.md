@@ -1,40 +1,53 @@
-# ARCHITECTURE — from prototype to production
+# RiskShield Architecture: Prototype to Production
 
-The prototype is a deliberate miniature of a production risk platform. Every
-box below exists in the repo in its simplest correct form; the right column is
-the scale-out swap. Interfaces stay identical, which is the point.
+> **Executive Summary**  
+> RiskShield is designed as a deliberate miniature of a production-grade risk platform. Every component in this repository represents a functional core that seamlessly scales out to enterprise infrastructure (e.g., Redis, Kafka, Flink) without altering the underlying interfaces or business logic. This architecture ensures high throughput, strict latency budgets (< 50ms p99), and resilient degradation.
+
+---
+
+## 🏗️ System Topology
+
+The following diagram illustrates the lifecycle of a transaction, separating the critical path (Serving Layer) from state management (Data Layer) and model lifecycle (Async & Batch Layer).
 
 ```mermaid
 flowchart TD
-    MC(Merchant Checkout)
+    %% Styling
+    classDef client fill:#f5f5f5,stroke:#333,stroke-width:2px;
+    classDef serving fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef data fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    classDef async fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+    classDef decision fill:#fce4ec,stroke:#c2185b,stroke-width:2px;
+
+    MC([Merchant Checkout]):::client
     
-    subgraph Serving [Serving Layer]
-        GW(API GW / Auth)
-        RS(Risk Scorer<br/>stateless, N replicas)
-        DE(Decision Engine<br/>cost matrix, margins)
+    subgraph Serving [⚡ Serving Layer - Critical Path]
+        GW(API GW / Auth):::serving
+        RS{Risk Scorer<br/>stateless, N replicas}:::serving
+        DE(Decision Engine<br/>cost matrix, margins):::decision
     end
     
-    subgraph Data [Data Layer]
-        OFS[(Online Feature Store<br/>Redis)]
-        EL{{Event Log<br/>Kafka}}
-        SU(Stream Updater<br/>Flink/consumer)
+    subgraph Data [🗄️ Data Layer - State & Streaming]
+        OFS[(Online Feature Store<br/>Redis)]:::data
+        EL{{Event Log<br/>Kafka}}:::data
+        SU(Stream Updater<br/>Flink/consumer):::data
     end
     
-    subgraph Async [Async & Batch Layer]
-        CB(Chargeback Webhook<br/>30-90d + evidence)
-        OB(Offline Batch<br/>feature build, training, drift)
-        MR[(Model Registry<br/>shadow -> canary)]
+    subgraph Async [🔄 Async & Batch Layer - Learning]
+        CB(Chargeback Webhook<br/>30-90d + evidence):::async
+        OB(Offline Batch<br/>feature build, training, drift):::async
+        MR[(Model Registry<br/>shadow -> canary)]:::async
     end
 
+    %% Flow
     MC -->|p99 budget: 50ms e2e| GW
     GW --> RS
     RS --> DE
     
-    DE -->|allow| Allow([Allow])
-    DE -->|step-up| 3DS([3DS Step-up])
-    DE -->|block| Block([Block])
+    DE -->|allow| Allow([🟢 Allow])
+    DE -->|step-up| 3DS([🟡 3DS Step-up])
+    DE -->|block| Block([🔴 Block])
     
-    RS -.->|reads| OFS
+    RS -.->|reads features| OFS
     DE -->|writes decision| EL
     
     EL --> SU
@@ -42,61 +55,71 @@ flowchart TD
     EL --> OB
     
     CB -->|labels| OB
-    OB -->|monthly| MR
-    MR -.->|model updates| RS
+    OB -->|monthly retraining| MR
+    MR -.->|model promotion| RS
 ```
 
-## Prototype -> production mapping
+---
 
-| Concern | In this repo | Production swap | Why the interface survives |
-|---|---|---|---|
-| Online features | `featurestore.py` in-proc dict, Welford, union-find | Redis hashes + HyperLogLog counters; Flink folds the stream | `features()/update()` contract unchanged |
-| Event stream | `warmup.json` + `replay.json` replayed in order | Kafka topics `txns`, `outcomes` | warmup at boot == log replay, same semantics |
-| Scoring | LightGBM + isotonic in one process, ~4 ms/txn | same artifact behind N stateless replicas + LB | model is a pure function; state lives in the store |
-| Decisions | `economics.py` cost matrix, margin per request | merchant config service; thresholds derived, not tuned | `decide(p, amount, cost)` unchanged |
-| Labels | 60-day maturity split + PU correction | chargeback webhooks joined by txn id, same maturity rule | `labels.py` logic is the joiner |
-| Retraining | `run.py` manual | scheduled batch; adversarial-validation gate (`drift.py`) blocks promotion; shadow -> 5% canary -> full | ablation table becomes the promotion report |
-| Ring detection | union-find + degree counters | nightly full graph job (Spark GraphFrames) writes component ids back to Redis | online counters are the fast approximation |
-| Evidence | `evidence.py` templated pack | queue consumer on dispute webhook; human review for MODERATE, auto-file STRONG | rebuttal map is the product |
-| Serving UI | `dashboard.html` + FastAPI | merchant dashboard tab in the PA console | endpoints are the contract |
+## 🔄 Prototype to Production Mapping
 
-## The three hard problems, and where they're handled
+The system is designed so that transitioning from prototype to production only requires swapping the backend implementations, while the APIs and domain logic remain untouched.
 
-**1. Training/serving skew.** Offline features are pandas expanding windows;
-online features are the store. These WILL diverge unless tested. The repo
-already shows the honest gap: offline recall 0.98, online replay recall ~0.75
-early in the stream (graph state and sequence buffers differ from the batch
-view). Production fix: log online feature vectors, diff nightly against the
-batch recompute, alert on drift per feature. This gap is why "we have a
-feature store" is a real engineering claim and not a slide.
+| Concern | Prototype Implementation | Production Scale-Out Swap | Architectural Interface Contract |
+|:---|:---|:---|:---|
+| **Online Features** | `featurestore.py` (in-proc dict, Welford, union-find) | Redis hashes + HyperLogLog counters; Flink folds the stream | `features()` and `update()` signatures remain identical |
+| **Event Stream** | `warmup.json` + `replay.json` replayed in order | Kafka topics (`txns`, `outcomes`) | Warmup at boot == log replay, preserving exact semantics |
+| **Scoring** | LightGBM + isotonic in one process (~4 ms/txn) | Same artifact behind N stateless replicas + Load Balancer | Model is a pure function; state lives entirely in the store |
+| **Decisions** | `economics.py` (cost matrix, margin per request) | Merchant config microservice; thresholds are derived, not tuned | `decide(p, amount, cost)` remains unchanged |
+| **Labels** | 60-day maturity split + PU correction | Chargeback webhooks joined by txn id | `labels.py` logic acts as the joiner |
+| **Retraining** | `run.py` (manual) | Scheduled batch; adversarial validation gate (`drift.py`) | The ablation table becomes the automated promotion report |
+| **Ring Detection** | Union-find + degree counters | Nightly full graph job (Spark GraphFrames) writes to Redis | Online counters act as the fast, real-time approximation |
+| **Evidence** | `evidence.py` (templated pack) | Queue consumer on dispute webhook; auto-file for STRONG cases | The rebuttal map is the final product |
 
-**2. Delayed labels.** A chargeback arrives 30–90 days late. The label joiner
-never marks a fresh transaction negative — it is unlabelled (`labels.py`).
-Monitoring uses proxy metrics until maturity: 3DS failure rate on step-ups,
-issuer declines, early-dispute rate.
+---
 
-**3. State at scale.** Per-uid state is O(active accounts): ~200 bytes of
-aggregates + 16x7 floats of sequence buffer + graph counters ≈ under 1 KB per
-account. 50M accounts ≈ 50 GB — one Redis cluster. Union-find doesn't shard
-naively; production uses the nightly graph job for exact components and keeps
-only degree counters online. Both are already separated in `featurestore.py`.
+## 🧠 Overcoming The Three Hard Problems
 
-## Failure modes and degradation ladder
+Building a production risk engine is not just about training a model; it is about managing data integrity and latency at scale. Here is how RiskShield tackles the industry's hardest problems:
 
-| Failure | Behaviour |
-|---|---|
-| Feature store down | score on row-only features (the 0.64 PR-AUC baseline), flag `degraded=true`, never hard-fail the payment |
-| Model artifact bad | fall back to previous registry version; decisions engine unchanged |
-| Score timeout > 50 ms | default action = step-up (cheapest wrong answer), async re-score |
-| Drift gate trips | block promotion, keep serving old model, page the owner |
+### 1. Training/Serving Skew
+Offline features rely on Pandas expanding windows, while online features rely on the real-time feature store. **These will diverge unless rigorously tested.** 
+* **The honest gap:** Our offline recall is 0.98, while our online replay recall is ~0.75 early in the stream (due to graph state and sequence buffers differing from the batch view). 
+* **The Production Fix:** We log online feature vectors and diff them nightly against the batch recompute, alerting on drift per feature. This rigor ensures our "feature store" is a robust engineering reality, not just a buzzword.
 
-Step-up as the timeout default is the single most important line in the
-ladder: the cost-matrix says the expensive mistakes are silent allows and
-hard blocks; friction is the cheap failure.
+### 2. Delayed Labels (The 90-Day Problem)
+A chargeback arrives 30–90 days late. The label joiner must never mark a fresh transaction as negative—it remains inherently unlabelled (`labels.py`). 
+* **The Fix:** Monitoring uses proxy metrics until label maturity: 3DS failure rate on step-ups, issuer declines, and early-dispute velocity.
 
-## Non-goals (deliberate)
+### 3. State Management at Scale
+Per-user state grows at `O(active accounts)`. 
+* **The Math:** ~200 bytes of aggregates + 16x7 floats of sequence buffer + graph counters ≈ **< 1 KB per account**. For 50M accounts, this is ~50 GB, easily fitting into a single Redis cluster. 
+* **The Fix:** Union-find does not shard naively. Production uses the nightly graph job for exact component IDs and keeps only scalable degree counters online. Both logic paths are cleanly separated in `featurestore.py`.
 
-Device fingerprinting SDKs, consortium data sharing, rules-engine DSL, and
-real-time graph neural networks are all out of scope. Each is a product in
-itself; the architecture leaves a seam for them (extra features into the same
-scorer) without depending on any.
+---
+
+## 🛡️ Resiliency and Degradation Ladder
+
+When dealing with money, failing securely and gracefully is critical. 
+
+| Failure Mode | System Behavior |
+|:---|:---|
+| **Feature store down** | Score on row-only features (the 0.64 PR-AUC baseline), flag `degraded=true`. **Never hard-fail the payment.** |
+| **Model artifact corrupted** | Fall back to the previous registry version; the decision engine remains unchanged. |
+| **Score timeout (> 50 ms)** | Default action = **step-up (3DS)**. This is the cheapest wrong answer; re-score asynchronously. |
+| **Drift gate trips** | Block promotion, continue serving the old model, and page the on-call engineer. |
+
+> [!TIP]
+> **Friction over failure:** Using "Step-up" as the timeout default is the single most important line in the ladder. The cost-matrix dictates that the most expensive mistakes are *silent allows* (fraud) and *hard blocks* (insult rate); friction is the cheapest failure.
+
+---
+
+## 🚫 Non-Goals (Deliberate Scope Boundaries)
+
+To maintain a clean architectural seam, the following are deliberately out of scope but can be seamlessly integrated:
+- Device fingerprinting SDKs
+- Consortium data sharing
+- Rules-engine DSL
+- Real-time graph neural networks 
+
+Each of these is a product in itself. The architecture leaves a distinct integration seam (e.g., passing extra features into the same scorer) without introducing brittle dependencies.
