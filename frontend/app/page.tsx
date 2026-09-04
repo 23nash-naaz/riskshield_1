@@ -1,93 +1,121 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-  PieChart, Pie, Legend,
-} from 'recharts';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 
-// ─── Types ───────────────────────────────────────────────────────
 type Action = 'allow' | 'stepup' | 'block';
-type Stats = {
-  processed: number; precision: number; recall: number;
-  fp_per_1k_good: number; rupees_saved: number; margin: number;
-};
 type RiskEvent = {
-  txn_id: number; amount: number; action: Action;
-  reason_codes: string[]; true_fraud: number; risk_score: number;
+  txn_id: number;
+  amount: number;
+  action: Action;
+  reason_codes: string[];
+  true_fraud: number;
+  risk_score: number;
+  card?: string;
+  expected_cost_inr?: Record<string, number>;
+  saved_vs_allow_inr?: number;
 };
-type AblationStage = {
-  stage: string; PR_AUC_raw: number; rupees_per_1k: number;
+type Stats = {
+  processed: number;
+  precision: number;
+  recall: number;
+  fp_per_1k_good: number;
+  rupees_saved: number;
 };
 type Ring = {
   ring_id: number; severity: string; score: number;
   n_accounts: number; n_fraud: number; fraud_rate: number;
   n_devices: number; device_concentration: number;
-  total_amount_inr: number; n_emails: number; n_bins: number;
-  shared_devices: string[]; shared_emails: string[];
+  total_amount_inr: number;
+  shared_devices?: string[];
 };
 
 const inr = (v: number) => '₹' + Math.round(v).toLocaleString('en-IN');
+const clock = () => new Date().toLocaleTimeString('en-IN', { hour12: false });
+const cardMask = (e: RiskEvent) => {
+  const n = String(e.txn_id).padStart(4, '0').slice(-4);
+  return (e.card || 'card').toUpperCase().slice(0, 4) + ' •• ' + n;
+};
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getRupeeData(metrics: any) {
-  if (!metrics?.rupees) return [];
-  return [
-    { name: 'Model', value: Math.round(metrics.rupees.model), fill: '#22c55e' },
-    { name: 'Step-up All', value: Math.round(metrics.rupees.stepup_all), fill: '#eab308' },
-    { name: 'Rule: Top 3%', value: Math.round(metrics.rupees.rule_amount), fill: '#8b8d98' },
-    { name: 'Allow All', value: Math.round(metrics.rupees.allow_all), fill: '#ef4444' },
-    { name: 'Block All', value: Math.round(metrics.rupees.block_all), fill: '#5c5e6a' },
-  ];
-}
-
-// ─── Component ───────────────────────────────────────────────────
 export default function Page() {
-  const [tab, setTab] = useState<string>('shield');
-  const [stats, setStats] = useState<Stats>({ processed: 0, precision: 0, recall: 0, fp_per_1k_good: 0, rupees_saved: 0, margin: 0.2 });
-  const [events, setEvents] = useState<RiskEvent[]>([]);
+  const [page, setPage] = useState('live');
+  const [merchant, setMerchant] = useState(0.20);
+  const [mid, setMid] = useState('MID: rzp_live_8kQ2…f4');
+  const [speed, setSpeed] = useState(450);
   const [running, setRunning] = useState(false);
-  const [speed, setSpeed] = useState(300);
-  const [margin, setMargin] = useState(20);
-  const [thresholds, setThresholds] = useState({ stepup: 0.005, block: 0.302 });
-  const [mix, setMix] = useState({ allow: 0, stepup: 0, block: 0 });
-  const [cm, setCm] = useState({ tp: 0, fp: 0, fn: 0, tn: 0 });
-  const [ablation, setAblation] = useState<AblationStage[]>([]);
+  const [filterQuery, setFilterQuery] = useState('');
+  
+  const [stats, setStats] = useState<Stats>({ processed: 0, precision: 0, recall: 0, fp_per_1k_good: 0, rupees_saved: 0 });
+  const [events, setEvents] = useState<(RiskEvent & { time: string })[]>([]);
+  const [disputes, setDisputes] = useState<(RiskEvent & { deadline: string })[]>([]);
+  
+  const [thresholds, setThresholds] = useState({ stepup: 0.3, block: 0.8 });
   const [rings, setRings] = useState<Ring[]>([]);
-  const [offlineMetrics, setOfflineMetrics] = useState<any>({});
-  const total = useRef(0);
+  const [health, setHealth] = useState<any>({});
+  
+  const [drawerEvent, setDrawerEvent] = useState<RiskEvent | null>(null);
+  const [packText, setPackText] = useState('');
+  
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const latencies = useRef<number[]>([]);
+  const [p50, setP50] = useState(0);
 
-  // Load static data on mount
+  // Fetch initial data
   useEffect(() => {
-    fetch('/api/ablation').then(r => r.json()).then(d => setAblation(d.stages || [])).catch(() => {});
+    fetch('/api/health').then(r => r.json()).then(d => setHealth(d)).catch(() => {});
     fetch('/api/rings').then(r => r.json()).then(d => setRings(d.rings || [])).catch(() => {});
-    fetch('/api/offline-metrics').then(r => r.json()).then(d => setOfflineMetrics(d)).catch(() => {});
-    fetch('/api/margin?margin=0.2', { method: 'POST' }).then(r => r.json())
-      .then(d => setThresholds({ stepup: d.thresholds?.stepup ?? 0, block: d.thresholds?.block ?? 1 })).catch(() => {});
+    updateMargin(0.20);
   }, []);
 
-  // Replay step
+  const updateMargin = async (m: number) => {
+    setMerchant(m);
+    try {
+      const r = await fetch('/api/margin?margin=' + m, { method: 'POST' });
+      const d = await r.json();
+      const t = d.thresholds || {};
+      const su = t.stepup ?? t.block ?? 1;
+      const bl = t.block ?? 1;
+      setThresholds({ stepup: su, block: bl });
+    } catch(e) {}
+  };
+
+  const handleMerchantSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const m = Number(e.target.value);
+    setMid('MID: rzp_live_' + Math.random().toString(36).slice(2, 6) + '…' + Math.random().toString(36).slice(2, 4));
+    updateMargin(m);
+  };
+
   const step = useCallback(async () => {
-    const r = await fetch('/api/simulate/step?n=1', { method: 'POST' });
-    const d = await r.json();
-    if (!d.events?.length) { setRunning(false); return; }
-    const e: RiskEvent = d.events[0];
-    setEvents((prev: RiskEvent[]) => [e, ...prev].slice(0, 40));
-    total.current++;
-    setMix(prev => ({ ...prev, [e.action]: prev[e.action] + 1 }));
-    const flagged = e.action !== 'allow';
-    const fraud = !!e.true_fraud;
-    setCm(prev => ({
-      tp: prev.tp + (flagged && fraud ? 1 : 0),
-      fp: prev.fp + (flagged && !fraud ? 1 : 0),
-      fn: prev.fn + (!flagged && fraud ? 1 : 0),
-      tn: prev.tn + (!flagged && !fraud ? 1 : 0),
-    }));
-    setStats(d.stats);
+    const t0 = performance.now();
+    try {
+      const r = await fetch('/api/simulate/step?n=1', { method: 'POST' });
+      const ms = performance.now() - t0;
+      latencies.current.push(ms);
+      if (latencies.current.length > 200) latencies.current.shift();
+      
+      const d = await r.json();
+      if (!d.events || !d.events.length) {
+        setRunning(false);
+        return;
+      }
+      
+      const e = d.events[0];
+      const newEvent = { ...e, time: clock() };
+      
+      setEvents(prev => [newEvent, ...prev].slice(0, 60));
+      setStats(d.stats);
+      
+      if (e.true_fraud && e.action === 'allow') {
+        const dl = new Date(Date.now() + 7 * 864e5).toLocaleDateString('en-IN');
+        setDisputes(prev => [{ ...e, deadline: dl }, ...prev]);
+      }
+      
+      const sorted = [...latencies.current].sort((a, b) => a - b);
+      setP50(sorted[Math.floor(sorted.length / 2)] || 0);
+    } catch(e) {
+      setRunning(false);
+    }
   }, []);
 
-  // Timer
   useEffect(() => {
     if (running) {
       timerRef.current = setInterval(step, speed);
@@ -97,354 +125,256 @@ export default function Page() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [running, speed, step]);
 
-  // Margin slider
-  const handleMargin = async (val: number) => {
-    setMargin(val);
-    const r = await fetch(`/api/margin?margin=${val / 100}`, { method: 'POST' });
-    const d = await r.json();
-    setThresholds({ stepup: d.thresholds?.stepup ?? 0, block: d.thresholds?.block ?? 1 });
+  const toggleRun = () => setRunning(prev => !prev);
+  
+  const generatePack = async (e: RiskEvent) => {
+    try {
+      const r = await fetch('/api/dispute-pack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          txn: { TransactionID: e.txn_id, TransactionAmt: e.amount, DeviceInfo: 1, TransactionDT: Date.now() / 1000, avs_match: true, cvv_match: true, ip_country: 'IN', bill_country: 'IN' },
+          history: [], dispute_code: '10.4'
+        })
+      });
+      const p = await r.json();
+      setPackText(p.text);
+    } catch(err) {
+      setPackText("Failed to generate pack.");
+    }
   };
 
-  const totalMix = total.current || 1;
-  const mixPct = { allow: (mix.allow / totalMix) * 100, stepup: (mix.stepup / totalMix) * 100, block: (mix.block / totalMix) * 100 };
+  const openDrawer = (e: RiskEvent) => {
+    setDrawerEvent(e);
+    setPackText('');
+  };
+  
+  const filteredEvents = useMemo(() => {
+    if (!filterQuery) return events;
+    const q = filterQuery.toLowerCase();
+    return events.filter(e => 
+      e.txn_id.toString().includes(q) || 
+      e.amount.toString().includes(q) || 
+      e.action.includes(q) || 
+      e.reason_codes.join(' ').toLowerCase().includes(q)
+    );
+  }, [events, filterQuery]);
 
-  // Pie chart data for action mix
-  const pieData = [
-    { name: 'Allow', value: mix.allow, color: 'var(--green)' },
-    { name: 'Step-up', value: mix.stepup, color: 'var(--amber)' },
-    { name: 'Block', value: mix.block, color: 'var(--red)' },
-  ].filter(function(d) { return d.value > 0; });
-
-  // Rupee comparison data for results tab
-  const rupeeData = getRupeeData(offlineMetrics);
+  const b1w = thresholds.stepup * 100;
+  const b2w = (thresholds.block - thresholds.stepup) * 100;
+  const b3w = (1 - thresholds.block) * 100;
 
   return (
-    <div className="shell">
-      {/* Header */}
-      <header className="header">
-        <div className="header-left">
-          <div className="logo">R</div>
-          <div>
-            <div className="header-title">RiskShield</div>
-            <div className="header-subtitle">AI Risk Manager · Track 02</div>
-          </div>
-        </div>
-        <div className="header-right">
-          <select className="select" value={speed} onChange={e => setSpeed(Number(e.target.value))}>
-            <option value={800}>Slow</option>
-            <option value={300}>Normal</option>
-            <option value={80}>Fast</option>
+    <div style={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden' }}>
+      <aside>
+        <div className="logo"><div className="mark">R</div><div><b>RiskShield</b><span>RISK OPERATIONS</span></div></div>
+        <div className="merch">
+          <label>Merchant</label>
+          <select value={merchant} onChange={handleMerchantSelect}>
+            <option value={0.05}>Veltron Electronics · 5% margin</option>
+            <option value={0.20}>Kanchi Home &amp; Living · 20%</option>
+            <option value={0.60}>Luma SaaS Pvt Ltd · 60%</option>
           </select>
-          <button className={running ? 'btn' : 'btn btn-primary'} onClick={() => setRunning(p => !p)}>
-            {running ? 'Pause' : 'Start Replay'}
-          </button>
+          <div className="mline mono">{mid}</div>
         </div>
-      </header>
+        <nav>
+          <a className={page === 'live' ? 'on' : ''} onClick={() => setPage('live')}>▦ Live decisions</a>
+          <a className={page === 'disputes' ? 'on' : ''} onClick={() => setPage('disputes')}>⚑ Disputes {disputes.length > 0 && <span className="badge">{disputes.length}</span>}</a>
+          <a className={page === 'settings' ? 'on' : ''} onClick={() => setPage('settings')}>⚙ Cost model</a>
+          <a className={page === 'rings' ? 'on' : ''} onClick={() => setPage('rings')}>⚯ Abuse rings</a>
+        </nav>
+        <div className="syshealth">
+          <div><span>Scorer</span><span className="okdot">● healthy</span></div>
+          <div><span>Feature store</span><span className="okdot">● warm</span></div>
+          <div><span>Model</span><span className="mono">lgbm-iso v1.3</span></div>
+        </div>
+      </aside>
 
-      {/* Tabs */}
-      <div className="tabs">
-        <button className={`tab ${tab === 'shield' ? 'active' : ''}`} onClick={() => setTab('shield')}>Live Console</button>
-        <button className={`tab ${tab === 'results' ? 'active' : ''}`} onClick={() => setTab('results')}>Results</button>
-        <button className={`tab ${tab === 'rings' ? 'active' : ''}`} onClick={() => setTab('rings')}>Abuse Rings</button>
-      </div>
+      <div className="main">
+        <div className="topbar">
+          <span className="env">● LIVE</span>
+          <input type="text" placeholder="Filter tape: amount / reason / action…" value={filterQuery} onChange={e => setFilterQuery(e.target.value)} />
+          <div className="spacer"></div>
+          <select value={speed} onChange={e => setSpeed(Number(e.target.value))}>
+            <option value={900}>Slow</option>
+            <option value={450}>Normal</option>
+            <option value={140}>Fast</option>
+          </select>
+          <button className="primary" onClick={toggleRun}>{running ? '⏸ Pause traffic' : '▶ Start traffic'}</button>
+          <div className="avatar">RM</div>
+        </div>
 
-      {/* ═══ LIVE CONSOLE TAB ═══ */}
-      {tab === 'shield' && (
-        <>
-          {/* KPIs */}
-          <div className="kpi-row">
-            <div className="kpi-card hero">
-              <div className="kpi-label">Rupees Saved</div>
-              <div className="kpi-value">{inr(stats.rupees_saved)}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Processed</div>
-              <div className="kpi-value">{stats.processed.toLocaleString('en-IN')}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Precision</div>
-              <div className="kpi-value">{stats.precision ? stats.precision.toFixed(3) : '—'}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Recall</div>
-              <div className="kpi-value">{stats.recall ? stats.recall.toFixed(3) : '—'}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">FP / 1k Good</div>
-              <div className="kpi-value">{stats.fp_per_1k_good ? stats.fp_per_1k_good.toFixed(2) : '—'}</div>
-            </div>
-          </div>
+        <div className="content">
+          {/* Live Page */}
+          {page === 'live' && (
+            <div className="page on">
+              <div className="kpis">
+                <div className="kpi"><label>₹ saved vs allow-all</label><div className="v" id="saved">{inr(stats.rupees_saved)}</div></div>
+                <div className="kpi"><label>Processed</label><div className="v">{stats.processed.toLocaleString('en-IN')}</div></div>
+                <div className="kpi"><label>Precision</label><div className="v">{stats.precision ? stats.precision.toFixed(3) : '—'}</div></div>
+                <div className="kpi"><label>Recall</label><div className="v">{stats.recall ? stats.recall.toFixed(3) : '—'}</div></div>
+                <div className="kpi"><label>FP / 1k good</label><div className="v">{stats.fp_per_1k_good ? stats.fp_per_1k_good.toFixed(2) : '—'}</div></div>
+                <div className="kpi"><label>p50 latency</label><div className="v">{p50 ? p50.toFixed(0) + ' ms' : '—'}</div></div>
+              </div>
 
-          <div className="grid-2">
-            {/* Left: Decision tape + bottom row */}
-            <div>
               <div className="card">
-                <div className="card-header">
-                  <span className="card-title">Decision Tape</span>
-                  <span className="card-badge">{running ? 'Live' : events.length ? 'Paused' : 'Ready'}</span>
-                </div>
-                <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-                  {events.length === 0 ? (
-                    <div className="empty">Press Start Replay to stream held-out transactions</div>
-                  ) : events.map((e, i) => (
-                    <div key={`${e.txn_id}-${i}`} className="tape-row">
-                      <span className="txn-id">#{e.txn_id}</span>
-                      <span className="txn-amt">{inr(e.amount)}</span>
-                      <span className={`pill pill-${e.action}`}>{e.action}</span>
-                      <span className="reason">{e.reason_codes.join(' · ')}</span>
-                      <span className={`dot ${e.true_fraud ? 'dot-fraud' : 'dot-safe'}`} title={e.true_fraud ? 'Chargeback' : 'Clean'} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Bottom: confusion matrix + action mix chart */}
-              <div className="grid-2-equal">
-                <div className="card">
-                  <div className="card-header"><span className="card-title">Confusion Matrix</span></div>
-                  <div className="card-body">
-                    <div className="cm-grid">
-                      <div className="cm-corner" />
-                      <div className="cm-label">Flagged</div>
-                      <div className="cm-label">Allowed</div>
-                      <div className="cm-label">Fraud</div>
-                      <div className="cm-cell cm-tp"><span className="cm-num">{cm.tp}</span><span className="cm-sub">TP</span></div>
-                      <div className="cm-cell cm-fn"><span className="cm-num">{cm.fn}</span><span className="cm-sub">FN</span></div>
-                      <div className="cm-label">Clean</div>
-                      <div className="cm-cell cm-fp"><span className="cm-num">{cm.fp}</span><span className="cm-sub">FP</span></div>
-                      <div className="cm-cell cm-tn"><span className="cm-num">{cm.tn}</span><span className="cm-sub">TN</span></div>
-                    </div>
-                  </div>
-                </div>
-                <div className="card">
-                  <div className="card-header"><span className="card-title">Action Distribution</span></div>
-                  <div className="card-body">
-                    {pieData.length > 0 ? (
-                      <div className="chart-wrap-sm">
-                        <ResponsiveContainer>
-                          <PieChart>
-                            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%"
-                              innerRadius={30} outerRadius={55} paddingAngle={3}>
-                              {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                            </Pie>
-                            <Legend wrapperStyle={{ fontSize: 11, color: '#8b8d98' }} />
-                            <Tooltip formatter={(v: number) => v.toLocaleString()} contentStyle={{ background: '#16181d', border: '1px solid #2a2d35', borderRadius: 6, fontSize: 12 }} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                    ) : (
-                      <div className="empty">Start replay to see distribution</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Right sidebar */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {/* Margin slider */}
-              <div className="card">
-                <div className="card-header"><span className="card-title">Merchant Economics</span></div>
-                <div className="slider-section">
-                  <div className="slider-row">
-                    <span>Contribution margin</span>
-                    <strong>{margin}%</strong>
-                  </div>
-                  <input type="range" min={2} max={80} value={margin} onChange={e => handleMargin(Number(e.target.value))} />
-                </div>
-              </div>
-
-              {/* Threshold band */}
-              <div className="card">
-                <div className="card-header"><span className="card-title">Score → Action</span></div>
-                <div className="card-body">
-                  <div className="band">
-                    <div className="band-allow" style={{ width: `${Math.max(8, thresholds.stepup * 100)}%` }}>allow</div>
-                    <div className="band-stepup" style={{ width: `${Math.max(8, (thresholds.block - thresholds.stepup) * 100)}%` }}>step-up</div>
-                    <div className="band-block" style={{ width: `${Math.max(8, (1 - thresholds.block) * 100)}%` }}>block</div>
-                  </div>
-                  <div className="scale-row"><span>0.0</span><span>0.5</span><span>1.0</span></div>
-                </div>
-              </div>
-
-              {/* Action mix bars */}
-              <div className="card">
-                <div className="card-header"><span className="card-title">Action Mix</span></div>
-                <div className="card-body">
-                  {(['allow', 'stepup', 'block'] as const).map(a => (
-                    <div key={a} className="mix-row">
-                      <span className={`mix-label mix-label-${a}`}>{a === 'stepup' ? 'step-up' : a}</span>
-                      <div className="mix-track"><div className={`mix-fill mix-fill-${a}`} style={{ width: `${mixPct[a]}%` }} /></div>
-                      <span className="mix-pct">{mixPct[a].toFixed(1)}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="note" style={{ borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
-                Red dots are confirmed chargebacks from held-out labels, revealed <b>after</b> each decision. Drag the margin slider to see how a 5% electronics merchant gets different thresholds from a 60% SaaS merchant.
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ═══ RESULTS TAB ═══ */}
-      {tab === 'results' && (
-        <div>
-          {/* Headline metrics */}
-          <div className="kpi-row" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-            <div className="kpi-card hero">
-              <div className="kpi-label">PR-AUC (Raw)</div>
-              <div className="kpi-value">{offlineMetrics.pr_auc_raw?.toFixed(4) ?? '—'}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Precision</div>
-              <div className="kpi-value">{offlineMetrics.precision?.toFixed(3) ?? '—'}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">Recall</div>
-              <div className="kpi-value">{offlineMetrics.recall?.toFixed(3) ?? '—'}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="kpi-label">95% CI</div>
-              <div className="kpi-value" style={{ fontSize: 16 }}>
-                {offlineMetrics.ci ? `[${offlineMetrics.ci[0].toFixed(3)}, ${offlineMetrics.ci[1].toFixed(3)}]` : '—'}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid-2-equal">
-            {/* Ablation chart */}
-            <div className="card">
-              <div className="card-header"><span className="card-title">Ablation Study — PR-AUC by Feature Stage</span></div>
-              <div className="card-body">
-                {ablation.length > 0 ? (
-                  <div className="chart-wrap">
-                    <ResponsiveContainer>
-                      <BarChart data={ablation} layout="vertical" margin={{ left: 100, right: 16, top: 4, bottom: 4 }}>
-                        <XAxis type="number" domain={[0, 1]} tick={{ fill: '#5c5e6a', fontSize: 11 }} />
-                        <YAxis type="category" dataKey="stage" tick={{ fill: '#8b8d98', fontSize: 11 }} width={95} />
-                        <Tooltip contentStyle={{ background: '#16181d', border: '1px solid #2a2d35', borderRadius: 6, fontSize: 12 }}
-                          formatter={(v: number) => v.toFixed(4)} />
-                        <Bar dataKey="PR_AUC_raw" radius={[0, 4, 4, 0]}>
-                          {ablation.map((_, i) => (
-                            <Cell key={i} fill={i === ablation.length - 1 ? '#22c55e' : '#3a3d45'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                ) : <div className="empty">Run pipeline to see ablation</div>}
-              </div>
-            </div>
-
-            {/* Rupee comparison */}
-            <div className="card">
-              <div className="card-header"><span className="card-title">₹ Lost per 1,000 Transactions</span></div>
-              <div className="card-body">
-                {rupeeData.length > 0 ? (
-                  <div className="chart-wrap">
-                    <ResponsiveContainer>
-                      <BarChart data={rupeeData} margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
-                        <XAxis dataKey="name" tick={{ fill: '#8b8d98', fontSize: 10 }} />
-                        <YAxis tick={{ fill: '#5c5e6a', fontSize: 11 }} />
-                        <Tooltip contentStyle={{ background: '#16181d', border: '1px solid #2a2d35', borderRadius: 6, fontSize: 12 }}
-                          formatter={(v: number) => `₹${v.toLocaleString('en-IN')}`} />
-                        <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                          {rupeeData.map((d, i) => <Cell key={i} fill={d.fill} />)}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                ) : <div className="empty">Run pipeline to see comparison</div>}
-              </div>
-            </div>
-          </div>
-
-          {/* Return risk + per-merchant thresholds */}
-          <div className="grid-2-equal" style={{ marginTop: 12 }}>
-            <div className="card">
-              <div className="card-header"><span className="card-title">Return-Risk Scorer</span></div>
-              <div className="card-body">
-                {offlineMetrics.return_metrics ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-                    <div><div className="kpi-label">PR-AUC</div><div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--green)' }}>{offlineMetrics.return_metrics.pr_auc?.toFixed(4)}</div></div>
-                    <div><div className="kpi-label">Abuse Rate</div><div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--mono)' }}>{(offlineMetrics.return_metrics.abuse_rate * 100).toFixed(1)}%</div></div>
-                    <div><div className="kpi-label">Avg Cost/Return</div><div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--amber)' }}>₹{offlineMetrics.return_metrics.avg_abuse_cost_inr}</div></div>
-                  </div>
-                ) : <div className="empty">No return data</div>}
-              </div>
-            </div>
-            <div className="card">
-              <div className="card-header"><span className="card-title">Per-Merchant Thresholds</span></div>
-              <div className="card-body">
-                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ color: 'var(--text-secondary)', textAlign: 'left' }}>
-                      <th style={{ padding: '6px 0', fontWeight: 500 }}>Margin</th>
-                      <th style={{ padding: '6px 0', fontWeight: 500 }}>Step-up ≥</th>
-                      <th style={{ padding: '6px 0', fontWeight: 500 }}>Block ≥</th>
-                    </tr>
-                  </thead>
-                  <tbody style={{ fontFamily: 'var(--mono)' }}>
-                    {[{ m: '5%', su: '0.003', bl: '0.092' }, { m: '20%', su: '0.005', bl: '0.302' }, { m: '60%', su: '0.014', bl: '0.570' }].map(r => (
-                      <tr key={r.m} style={{ borderTop: '1px solid var(--border)' }}>
-                        <td style={{ padding: '8px 0' }}>{r.m}</td>
-                        <td style={{ padding: '8px 0', color: 'var(--amber)' }}>{r.su}</td>
-                        <td style={{ padding: '8px 0', color: 'var(--red)' }}>{r.bl}</td>
+                <h2>Decision tape — held-out future window
+                  <span className="right"><span className="rc">{running ? 'streaming' : events.length ? 'paused' : 'idle'}</span></span>
+                </h2>
+                <table>
+                  <thead><tr><th>Time</th><th>Txn</th><th>Card</th><th>Amount</th><th>Decision</th><th>Signals</th><th>CB</th></tr></thead>
+                  <tbody>
+                    {filteredEvents.map((e, idx) => (
+                      <tr key={`${e.txn_id}-${idx}`} className="txn" onClick={() => openDrawer(e)}>
+                        <td className="rc">{e.time}</td>
+                        <td className="rc">#{e.txn_id}</td>
+                        <td>{cardMask(e)}</td>
+                        <td>{inr(e.amount)}</td>
+                        <td><span className={`chip ${e.action}`}>{e.action.toUpperCase()}</span></td>
+                        <td className="rc">{e.reason_codes.join(' · ')}</td>
+                        <td><span className={`dot ${e.true_fraud ? 'fraud' : 'ok'}`}></span></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Drift + honest weaknesses */}
-          <div className="card" style={{ marginTop: 12 }}>
-            <div className="card-header"><span className="card-title">Known Weaknesses (Honest Reporting)</span></div>
-            <div className="card-body" style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-secondary)' }}>
-              <p><b style={{ color: 'var(--text)' }}>Mid-value transactions (Q3):</b> PR-AUC 0.819 — too large for card-testing signature, too small for amount-anomaly features.</p>
-              <p style={{ marginTop: 8 }}><b style={{ color: 'var(--text)' }}>New accounts:</b> 9.5 FP per 1,000 vs 0.5 for returning — thin history causes over-flagging.</p>
-              <p style={{ marginTop: 8 }}><b style={{ color: 'var(--text)' }}>Adversarial drift AUC:</b> {offlineMetrics.drift_auc?.toFixed(3) ?? '—'} — distributions genuinely differ between train/test. Dropped features: {offlineMetrics.dropped?.join(', ') || 'none'}.</p>
+          {/* Disputes Page */}
+          {page === 'disputes' && (
+            <div className="page on">
+              <div className="card">
+                <h2>Chargebacks on allowed transactions — representment queue</h2>
+                <table>
+                  <thead><tr><th>Txn</th><th>Amount</th><th>Reason code</th><th>Deadline</th><th></th></tr></thead>
+                  <tbody>
+                    {disputes.map((e, idx) => (
+                      <tr key={`${e.txn_id}-${idx}`} className="txn">
+                        <td className="rc">#{e.txn_id}</td>
+                        <td>{inr(e.amount)}</td>
+                        <td className="rc">10.4 · Fraud, card absent</td>
+                        <td className="rc">{e.deadline}</td>
+                        <td><button onClick={() => openDrawer(e)}>Evidence →</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {disputes.length === 0 && <div className="empty">No disputes yet. They appear when an allowed transaction turns out to be a confirmed chargeback.</div>}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* ═══ RINGS TAB ═══ */}
-      {tab === 'rings' && (
-        <div>
-          {rings.length === 0 ? (
-            <div className="empty" style={{ padding: 60 }}>No abuse rings detected above threshold</div>
-          ) : (
-            <div className="rings-grid">
-              {rings.map(ring => (
-                <div key={ring.ring_id} className="ring-card">
-                  <div className="ring-top">
-                    <span className="ring-name">Ring #{ring.ring_id}</span>
-                    <span className={`severity severity-${ring.severity.toLowerCase()}`}>{ring.severity}</span>
+          {/* Settings Page */}
+          {page === 'settings' && (
+            <div className="page on">
+              <div className="card">
+                <h2>Merchant economics — thresholds are solved from these numbers, not tuned</h2>
+                <div style={{ padding: 16, maxWidth: 560 }}>
+                  <div className="mono" style={{ marginBottom: 6 }}>Contribution margin <b style={{ color: 'var(--brass)' }}>{Math.round(merchant * 100)}%</b></div>
+                  <input type="range" min={2} max={80} value={merchant * 100} onChange={e => updateMargin(Number(e.target.value) / 100)} />
+                  <div className="slider-band">
+                    <div className="b1" style={{ width: b1w + '%' }}>ALLOW</div>
+                    <div className="b2" style={{ width: b2w + '%' }}>STEP-UP</div>
+                    <div className="b3" style={{ width: b3w + '%' }}>BLOCK</div>
                   </div>
-                  <div className="ring-stats">
-                    <div className="ring-stat">Accounts<strong>{ring.n_accounts.toLocaleString()}</strong></div>
-                    <div className="ring-stat">Fraud txns<strong>{ring.n_fraud}</strong></div>
-                    <div className="ring-stat">Fraud rate<strong>{(ring.fraud_rate * 100).toFixed(1)}%</strong></div>
-                    <div className="ring-stat">Devices<strong>{ring.n_devices.toLocaleString()}</strong></div>
-                    <div className="ring-stat">Dev conc.<strong>{ring.device_concentration}×</strong></div>
-                    <div className="ring-stat">Total ₹<strong>{inr(ring.total_amount_inr)}</strong></div>
-                  </div>
-                  {ring.shared_devices?.length > 0 && (
-                    <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-dim)' }}>
-                      Shared devices: {ring.shared_devices.slice(0, 3).join(', ')}
-                    </div>
-                  )}
+                  <div className="rc" style={{ marginTop: 8 }}>Risk score 0 → 1. Where each action becomes rupee-optimal for this merchant.</div>
+                  <table style={{ marginTop: 18 }}>
+                    <tbody>
+                      <tr><td>Chargeback dispute fee</td><td className="mono" style={{ textAlign: 'right' }}>₹1,500</td></tr>
+                      <tr><td>3DS abandonment (good users)</td><td className="mono" style={{ textAlign: 'right' }}>8%</td></tr>
+                      <tr><td>3DS fraud-stop rate</td><td className="mono" style={{ textAlign: 'right' }}>90%</td></tr>
+                      <tr><td>Step-up opex per call</td><td className="mono" style={{ textAlign: 'right' }}>₹2</td></tr>
+                    </tbody>
+                  </table>
+                  <div className="rc" style={{ marginTop: 8 }}>These are the model's most important inputs. In production each merchant sets their own from real dispute history.</div>
                 </div>
-              ))}
+              </div>
+            </div>
+          )}
+          
+          {/* Rings Page */}
+          {page === 'rings' && (
+            <div className="page on">
+              {rings.length === 0 ? (
+                <div className="empty" style={{ paddingTop: 60 }}>No abuse rings detected above threshold. Run python run.py first.</div>
+              ) : (
+                <div className="rings-grid">
+                  {rings.map(ring => (
+                    <div key={ring.ring_id} className="ring-card">
+                      <div className="ring-top">
+                        <span className="ring-name">Ring #{ring.ring_id}</span>
+                        <span className={`severity severity-${ring.severity.toLowerCase()}`}>{ring.severity}</span>
+                      </div>
+                      <div className="ring-stats">
+                        <div className="ring-stat">Accounts<strong>{ring.n_accounts.toLocaleString()}</strong></div>
+                        <div className="ring-stat">Fraud txns<strong>{ring.n_fraud}</strong></div>
+                        <div className="ring-stat">Fraud rate<strong>{(ring.fraud_rate * 100).toFixed(1)}%</strong></div>
+                        <div className="ring-stat">Devices<strong>{ring.n_devices.toLocaleString()}</strong></div>
+                        <div className="ring-stat">Dev conc.<strong>{ring.device_concentration}×</strong></div>
+                        <div className="ring-stat">Total ₹<strong>{inr(ring.total_amount_inr)}</strong></div>
+                      </div>
+                      {ring.shared_devices && ring.shared_devices.length > 0 && (
+                        <div className="ring-shared">
+                          Shared devices: {ring.shared_devices.slice(0, 3).join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
-      )}
+
+        <div className="statusbar">
+          <span>latency p50: {p50 ? p50.toFixed(0) + ' ms' : '—'}</span>
+          <span>queue: {health.replay_remaining ? health.replay_remaining.toLocaleString('en-IN') : '—'}</span>
+          <span>store: 9,267 accounts</span>
+          <span>region: ap-south-1</span><span style={{ marginLeft: 'auto' }}>RiskShield v1.3 · defense-only</span>
+        </div>
+      </div>
+
+      {/* Drawer */}
+      <div className={`drawer ${drawerEvent ? 'open' : ''}`}>
+        <div className="dh">
+          <b>Txn {drawerEvent ? '#' + drawerEvent.txn_id : ''}</b>
+          <div className="spacer"></div>
+          <button onClick={() => setDrawerEvent(null)}>✕</button>
+        </div>
+        <div className="body">
+          {drawerEvent && (
+            <>
+              <div className="kv"><span>Amount</span><b className="mono">{inr(drawerEvent.amount)}</b></div>
+              <div className="kv"><span>Card</span><span className="mono">{cardMask(drawerEvent)}</span></div>
+              <div className="kv"><span>Risk score (calibrated)</span><b className="mono">{drawerEvent.risk_score}</b></div>
+              <div className="kv"><span>Decision</span><span className={`chip ${drawerEvent.action}`}>{drawerEvent.action.toUpperCase()}</span></div>
+              <div className="kv"><span>Outcome</span><span>{drawerEvent.true_fraud ? '⚠ confirmed chargeback' : 'clean (so far)'}</span></div>
+              
+              <div style={{ marginTop: 14, font: '600 10px Archivo', letterSpacing: '.1em', color: 'var(--dim)' }}>EXPECTED COST OF EACH ACTION</div>
+              <div className="costrow">
+                {(['allow', 'stepup', 'block'] as Action[]).map(a => (
+                  <div key={a} className={`costbox ${a === drawerEvent.action ? 'best' : ''}`}>
+                    <label>{a}</label>
+                    <div className="cv">{drawerEvent.expected_cost_inr?.[a] != null ? inr(drawerEvent.expected_cost_inr[a]) : '—'}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="rc">System picked <b>{drawerEvent.action}</b> — the cheapest expected loss. Saved {inr(drawerEvent.saved_vs_allow_inr || 0)} vs allowing blindly.</div>
+              
+              <div style={{ marginTop: 14, font: '600 10px Archivo', letterSpacing: '.1em', color: 'var(--dim)' }}>SIGNALS (coarse by design)</div>
+              <div className="rc" style={{ marginTop: 6 }} dangerouslySetInnerHTML={{ __html: drawerEvent.reason_codes.join('<br>') }} />
+              
+              {drawerEvent.true_fraud > 0 && (
+                <>
+                  <button className="primary" style={{ marginTop: 16 }} onClick={() => generatePack(drawerEvent)}>Generate representment pack</button>
+                  {packText && <pre style={{ marginTop: 10 }}>{packText}</pre>}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
