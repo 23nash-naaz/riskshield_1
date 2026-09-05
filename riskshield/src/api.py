@@ -104,11 +104,18 @@ def _score_raw(uid, amount, ts, device, email, bin_, age, margin):
     else:
         action, costs = decide(p, amount, c)
         
+        # Reject Inference: randomly allow 1% of would-be blocks to prevent blind spots
+        if action == "block" and np.random.rand() < 0.01:
+            action = "allow"
+            
     shap = M["model"].predict(X, pred_contrib=True)[0][:-1]
+    reason_codes = dec.reasons(shap, M["cols"])
+    if action == "allow" and costs.get("block", float('inf')) == min(costs.values()):
+        reason_codes.append("REJECT_INFERENCE_EXPLORATION")
     FS.update(uid, amount, ts, device, email, bin_) # No seq_feats needed
     return {"risk_score": round(p, 4), "action": action,
             "degraded_mode": degraded_mode,
-            "reason_codes": dec.reasons(shap, M["cols"]),
+            "reason_codes": reason_codes,
             "expected_cost_inr": {k: round(v, 2) for k, v in costs.items()},
             "saved_vs_allow_inr": round(costs["allow"] - costs[action], 2)}
 
