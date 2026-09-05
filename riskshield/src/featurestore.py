@@ -12,7 +12,6 @@ import math
 from collections import deque
 
 DAY = 86400
-K = 16  # sequence buffer length, matches seqenc.K
 
 
 class _UF:
@@ -89,16 +88,12 @@ class FeatureStore:
         f["g_dev_per_uid"] = f["g_deg_DeviceInfo"] / (f["g_uid_deg"] + 1)
         return f
 
-    def sequence(self, uid):
-        a = self.acct.get(uid)
-        return list(a["seq"]) if a else []
-
     # ---------- state update (call AFTER scoring the txn) ----------
-    def update(self, uid, amount, ts, device, email, bin_, seq_feats=None):
+    def update(self, uid, amount, ts, device, email, bin_):
         a = self.acct.setdefault(uid, {
             "n": 0, "mean": 0.0, "m2": 0.0, "max": 0.0,
             "last_ts": None, "dt_sum": 0.0,
-            "recent": deque(maxlen=512), "seq": deque(maxlen=K)})
+            "recent": deque(maxlen=512)})
         a["n"] += 1
         d = amount - a["mean"]
         a["mean"] += d / a["n"]
@@ -108,8 +103,6 @@ class FeatureStore:
             a["dt_sum"] += ts - a["last_ts"]
         a["last_ts"] = ts
         a["recent"].append(ts)
-        if seq_feats is not None:
-            a["seq"].append(seq_feats)
 
         u = f"u:{uid}"
         for name, val in (("DeviceInfo", device), ("P_emaildomain", email),

@@ -1,17 +1,25 @@
 """Rupee-optimal decisions. This is the layer that turns a score into money.
 
-Three actions, not two. Step-up (3DS/OTP) converts a false positive from
-"lost sale" into "3 seconds of friction", which is what makes aggressive
-thresholds affordable in production.
+Four actions, not two. Step-up (3DS/OTP) converts a false positive from
+"lost sale" into "3 seconds of friction". REVIEW routes high-ticket borderline
+cases to human analysts to protect LTV.
+
+Cost Constants Split:
+- Learnable (Deterministic): cb_fee, stepup_opex, review_opex
+- Unlearnable (Stochastic): margin, stepup_abandon, stepup_stops
 """
 import numpy as np
 
 COST = {
+    # Learnable (Deterministic)
     "cb_fee": 1500.0,        # dispute handling fee per chargeback, INR
+    "stepup_opex": 2.0,      # cost of an OTP/3DS call, INR
+    "review_opex": 50.0,     # cost of human analyst review, INR
+    
+    # Unlearnable (Stochastic)
     "margin": 0.20,          # merchant contribution margin on a good sale
     "stepup_abandon": 0.08,  # fraction of good users who drop at OTP
     "stepup_stops": 0.90,    # fraction of fraud 3DS blocks
-    "stepup_opex": 2.0,      # cost of an OTP/3DS call, INR
 }
 
 
@@ -24,10 +32,12 @@ def expected_cost(p, amount, action, c=COST):
         return (p * (1 - c["stepup_stops"]) * (amount + c["cb_fee"])
                 + (1 - p) * amount * c["margin"] * c["stepup_abandon"]
                 + c["stepup_opex"])
+    if action == "review":
+        return c["review_opex"]
     raise ValueError(action)
 
 
-ACTIONS = ("allow", "stepup", "block")
+ACTIONS = ("allow", "stepup", "review", "block")
 
 
 def decide(p, amount, c=COST):

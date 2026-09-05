@@ -1,7 +1,7 @@
 # 🛡️ RiskShield: Enterprise-Grade Fraud & Dispute Engine
 **Razorpay Buildathon Track 02: AI Risk Manager**
 
-Most models optimize for F1 scores and fail in production. RiskShield optimizes for **Merchant Margin** and **System Uptime**.
+Most models optimize for F1 scores and fail in production. RiskShield optimizes for Merchant Margin and System Uptime.
 
 ## Section 1: The Rupee Impact (Put the money first)
 

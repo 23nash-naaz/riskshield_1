@@ -40,19 +40,79 @@ def op_point(y, p, amount, c=COST):
 
 
 def rupees(y, p, amount, c=COST):
-    """Realised rupee cost per 1000 txns, model vs baselines."""
+    """Realised rupee cost per 1000 txns, model vs baselines, with CI and decomposition."""
     n = len(y)
+    
+    # Vectorized computation of expected costs for each action
+    from economics import ACTIONS
+    M = np.stack([expected_cost(y.astype(float), amount, a, c) for a in ACTIONS]) # (n_actions, n)
+    
     def cost_of(acts):
-        return sum(expected_cost(y[i].astype(float), amount[i], acts[i], c)
-                   for i in range(n)) * 1000 / n
+        # acts can be an array of action strings
+        act_idx = np.array([ACTIONS.index(a) for a in acts])
+        return M[act_idx, np.arange(n)]
+        
     model_acts, _ = decide_vec(p, amount, c)
     hi = np.quantile(amount, 0.97)
+    
+    # Cost Decomposition for the model
+    # Fees & Goods (Fraud losses)
+    is_fraud = y == 1
+    is_good = y == 0
+    fees = sum((model_acts == "allow") & is_fraud) * c["cb_fee"] + sum((model_acts == "stepup") & is_fraud) * (1 - c["stepup_stops"]) * c["cb_fee"]
+    goods = sum(((model_acts == "allow") & is_fraud) * amount) + sum(((model_acts == "stepup") & is_fraud) * amount) * (1 - c["stepup_stops"])
+    friction_opex = sum(model_acts == "stepup") * c["stepup_opex"] + sum(model_acts == "review") * c["review_opex"]
+    margin_abandon = sum(((model_acts == "stepup") & is_good) * amount) * c["margin"] * c["stepup_abandon"]
+    false_blocks = sum(((model_acts == "block") & is_good) * amount) * c["margin"]
+
+    decomp = {
+        "fees": float(fees * 1000 / n),
+        "goods": float(goods * 1000 / n),
+        "friction": float((friction_opex + margin_abandon) * 1000 / n),
+        "false_blocks": float(false_blocks * 1000 / n),
+    }
+
+    # Best fixed threshold (p > thresh -> block, else allow)
+    # Simple grid search for best threshold
+    grid = np.linspace(0, 1, 101)
+    best_fixed_cost = float("inf")
+    for thresh in grid:
+        acts_fixed = np.where(p > thresh, "block", "allow")
+        cost = np.sum(cost_of(acts_fixed))
+        if cost < best_fixed_cost:
+            best_fixed_cost = cost
+    best_fixed = best_fixed_cost * 1000 / n
+
+    # Oracle (perfect knowledge of y)
+    # For y=1 (fraud), best action is block (0 cost if amount * margin > 0, actually stepup could be cheaper if negative cost, but it's not)
+    oracle_acts = np.where(y == 1, "block", "allow")
+    oracle = float(np.sum(cost_of(oracle_acts)) * 1000 / n)
+    
+    allow_all_cost = float(np.sum(cost_of(np.array(["allow"] * n))) * 1000 / n)
+    model_cost = float(np.sum(cost_of(model_acts)) * 1000 / n)
+    
+    # % of achievable savings
+    max_savings = allow_all_cost - oracle
+    model_savings = allow_all_cost - model_cost
+    pct_savings_captured = (model_savings / max_savings * 100) if max_savings > 0 else 0.0
+
+    # Bootstrap CI for model cost
+    rng = np.random.default_rng(0)
+    model_costs_arr = cost_of(model_acts)
+    boot_vals = [np.sum(rng.choice(model_costs_arr, size=n, replace=True)) * 1000 / n for _ in range(300)]
+    
     return {
-        "model": cost_of(model_acts),
-        "allow_all": cost_of(np.array(["allow"] * n)),
-        "block_all": cost_of(np.array(["block"] * n)),
-        "rule_amount": cost_of(np.where(amount > hi, "block", "allow")),
-        "stepup_all": cost_of(np.array(["stepup"] * n)),
+        "model": model_cost,
+        "model_ci_2.5": float(np.percentile(boot_vals, 2.5)),
+        "model_ci_97.5": float(np.percentile(boot_vals, 97.5)),
+        "allow_all": allow_all_cost,
+        "block_all": float(np.sum(cost_of(np.array(["block"] * n))) * 1000 / n),
+        "rule_amount": float(np.sum(cost_of(np.where(amount > hi, "block", "allow"))) * 1000 / n),
+        "stepup_all": float(np.sum(cost_of(np.array(["stepup"] * n))) * 1000 / n),
+        "best_fixed_threshold": best_fixed,
+        "oracle": oracle,
+        "pct_savings_captured": pct_savings_captured,
+        "decomposition": decomp
     }
 
 
