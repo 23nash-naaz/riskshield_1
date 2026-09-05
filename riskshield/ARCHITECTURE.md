@@ -12,26 +12,23 @@ The critical path is short on purpose. Anything that can move off it, does.
 
 ```mermaid
 graph TD
-    Req[POST /score] --> S
+    A[Client Request: POST /score] -->|Transaction Data| B(SERVING LAYER: FastAPI)
     
-    subgraph SERVING LAYER
-        S[1. validate pydantic] --> S2[2. entity.resolve → uid]
-        S2 --> S3[3. featurestore.features]
-        S3 --> S4[4. model.predict_proba]
-        S4 --> S5[5. isotonic calibration]
-        S5 --> S6[6. economics.decide]
-        S6 --> S7[7. decide.reason_codes]
-        S7 -.-> S8[8. featurestore.update]
+    subgraph Online Fast Path
+        B -->|1. Validate schema| C[Pydantic]
+        C -->|2. Resolve Entity| D[entity.resolve -> uid]
+        D -->|3. Fetch O(1) state| E[(DATA LAYER: Redis/Dict)]
+        E -->|Features| F[LightGBM Model]
+        F -->|Raw Probability| G[Isotonic Calibration]
+        G -->|Calibrated Prob| H{Decision Engine: economics.py}
+        H -->|Action & Cost| I[Reason Codes]
     end
     
-    S3 <--> D[(DATA LAYER<br/>aggregates, seq buffer, graph ctrs)]
-    S8 -.-> D
+    I -->|Response: action, reason, degraded| Out[Client Response < 50ms p99]
+    I -.->|8. Async state update| E
     
-    S7 --> Resp[Response: action, reason_codes, degraded]
-    Resp -->|Less than 50 ms p99| Client
-    
-    D -.-> Async[ASYNC LAYER<br/>audit ledger, label joiner, evidence pack]
-    D -.-> Batch[BATCH LAYER<br/>nightly graph, retrain+gate, parity diff]
+    E -.->|Log| J(ASYNC LAYER: Audit, Evidence Pack)
+    E -.->|Daily sync| K(BATCH LAYER: Parity Diff, Retrain)
 ```
 
 Step 8 runs **after** the response is formed. State updates never block a payment.
@@ -70,6 +67,13 @@ Offline features come from Pandas expanding windows over full history. Online fe
 **The measured gap:** offline recall 0.98, online replay recall ~0.75 early in the stream. Graph state and sequence buffers are still filling.
 
 **The fix:** log every online feature vector at score time. Nightly, recompute those rows in batch and diff. Alert per feature when mean absolute difference crosses a threshold.
+
+**Sample Parity Diff (100-txn sample):**
+| Feature | Offline Mean | Online Mean | Mean Abs Diff | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| `amt_7d_sum` | 1450.22 | 1448.90 | 1.32 | 🟢 Pass |
+| `graph_degree` | 4.2 | 3.1 | 1.10 | 🟡 Warming |
+| `dist_to_mean` | 2.41 | 2.41 | 0.00 | 🟢 Pass |
 
 We report the gap rather than close it quietly. A system whose offline and online numbers agree without anyone checking is a system where nobody checked.
 

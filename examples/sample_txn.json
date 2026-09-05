@@ -1,0 +1,10 @@
+{
+  "uid": "user_78901",
+  "amount": 2500.0,
+  "ts": 1715000000.0,
+  "device": "desktop_mac_safari",
+  "email": "gmail.com",
+  "card_bin": 411111,
+  "acct_age_days": 14.5,
+  "merchant_margin": 0.20
+}

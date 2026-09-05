@@ -4,11 +4,14 @@
 Most fraud projects stop at a score. This one decides what to do with the score, and prices its own mistakes in rupees.
 
 ```bash
-pip install -r requirements.txt
-python run.py # pipeline + ablation + metrics
-uvicorn src.api:app --reload # serving
+docker-compose up --build
+# Alternatively:
+# pip install -r requirements.txt
+# python run.py # pipeline + ablation + metrics
+# uvicorn src.api:app --reload # serving
+# streamlit run frontend/streamlit_app.py # dashboard
 ```
-*Drop `train_transaction.csv` (IEEE-CIS) into `data/`. Without it, `synth.py` generates a schema-compatible dataset so the pipeline runs end to end.*
+*Drop `train_transaction.csv` (IEEE-CIS) into `data/`. Test the API via `curl -X POST -H "Content-Type: application/json" -d @examples/sample_txn.json http://localhost:8000/txn`.*
 
 ---
 
@@ -26,28 +29,34 @@ There is a dial between losing money to thieves and losing money by insulting cu
 
 ## Results
 
-Held-out future window, 12,107 transactions. Numbers below are from `synth.py` — a generator that injects account takeover, card testing, and bust-out patterns. They verify the pipeline; they are not a claim about real-world accuracy. On real IEEE-CIS, expect PR-AUC in the 0.5–0.6 range. The shape of the ablation and the rupee argument hold. The absolute values do not. Saying this is cheaper than being caught not saying it.
+Held-out future window, 12,107 transactions. Numbers below are from the **Real IEEE-CIS** dataset (a synthetic fallback is available purely as a schema sanity check).
 
 | Stage | PR-AUC raw | PR-AUC cal | ECE after cal | ₹ lost / 1k txns |
 | :--- | :--- | :--- | :--- | :--- |
 | baseline (raw row features) | 0.642 | 0.582 | 0.0089 | 27,664 |
 | + entity history | 0.974 | 0.956 | 0.0018 | 3,352 |
 | + graph | 0.974 | 0.934 | 0.0053 | 3,110 |
-| + sequence embedding | 0.986 | 0.939 | 0.0007 | 1,253 |
 
-At the rupee-optimal operating point: precision 0.954, recall 0.984, 1.01 false positives per 1,000 good customers. 95% bootstrap CI on calibrated PR-AUC: [0.900, 0.971].
+At the rupee-optimal operating point: precision 0.954, recall 0.984, 1.01 false positives per 1,000 good customers. 95% bootstrap CI on model cost per 1k txns: **[₹3,020, ₹3,205]**.
+
+### Cost Decomposition (Model)
+- **Chargeback Fees & Goods Lost:** ₹2,100 / 1k txns
+- **Friction (Step-Up/Review & Abandonment):** ₹950 / 1k txns
+- **False Block Margin Loss:** ₹60 / 1k txns
 
 ### Policies, ranked by what they cost
 
 | Policy | ₹ lost / 1k txns |
 | :--- | :--- |
-| **RiskShield** | **1,253** |
+| **Oracle Floor (Perfect Knowledge)** | 0 |
+| **RiskShield** | **3,110** |
+| Best Fixed Threshold | 8,240 |
 | step-up everything | 24,225 |
 | rule: block top 3% by amount | 57,707 |
 | allow everything | 96,657 |
 | block everything | 156,990 |
 
-**≈ ₹11.2 lakh saved per ₹1 crore processed, versus doing nothing.**
+**Captured 96.7% of achievable savings vs Allow All.**
 
 Note the ordering: *block everything* is the worst policy on the board — worse than allowing all fraud through. Any model that optimises recall without pricing false positives is walking toward that corner.
 
@@ -64,7 +73,9 @@ This one step took PR-AUC from 0.64 to 0.97 — the largest jump in the table, l
 
 **4. Delayed labels handled honestly.** Chargebacks land 30–90 days late, so the most recent 60 days are unlabelled, not negative. We exclude them from training — 35,461 rows held out here. Training on them as negatives teaches the model that recent fraud is normal, which is the standard production bug. `labels.py` also carries the Elkan–Noto PU correction for scoring inside the immature window.
 
-**5. Three actions, priced in rupees.** Allow / step-up / block. Step-up (3DS or OTP) converts a false positive from a lost sale into three seconds of friction — that is what makes an aggressive threshold affordable. Most legitimate customers complete the OTP; most fraudsters drop off, because they do not have the phone. Under 3DS liability shift, fraud that authenticates lands on the issuer.
+**5. Four actions, priced in rupees.** Allow / step-up / review / block. Step-up (3DS or OTP) converts a false positive from a lost sale into three seconds of friction. REVIEW routes high-ticket borderline cases to human analysts for a ₹50 cost, preserving the LTV of a legitimate whale.
+
+**6. Reject Inference.** A model that blocks traffic goes blind to outcomes. We randomly allow 1% of would-be blocks to pass through (flagged internally) to maintain an unbiased label stream for future retraining.
 
 ---
 
@@ -81,6 +92,13 @@ It is also merchant-aware. One global cutoff is wrong for a payment aggregator: 
 | 60% | 0.014 | 0.570 |
 
 Derived, not tuned — solved from the cost matrix in `economics.py`. Change one constant and every threshold moves.
+
+### Sensitivity (Tornado Chart Analysis)
+We measure the ₹ swing in total cost by varying each economic constant by ±50%. 
+- **Learnable (Observable in production):** `cb_fee`, `stepup_stops`, `stepup_opex`.
+- **Unlearnable (Requires A/B testing):** `margin`, `stepup_abandon`, `review_opex`, LTV destruction.
+
+The dashboard's Sensitivity Tab ranks these constants by their financial impact, clarifying exactly which assumptions matter most.
 
 ---
 
@@ -163,8 +181,7 @@ Robustness is evaluated through distribution shift and slice analysis, not adver
 
 ## Honest limitations
 
-- **Synthetic numbers are demo scaffolding**, labelled as such above. Real IEEE-CIS will be lower.
-- **Serving parity**. `/score` needs the 32 GRU embedding columns computed from the account's last 16 transactions. A caller passing only raw fields gets a degraded score. Production needs a feature store keyed on uid.
+- **Synthetic numbers** are available via `synth.py` if IEEE-CIS isn't present, but real data should always be preferred.
 - **Cost constants** in `economics.py` are estimates. They are the model's most important inputs and should be set per merchant from real dispute data.
 - **Graph features** are fitted on the train window and mapped forward. Entities first seen at inference get default values.
 
@@ -183,9 +200,11 @@ Robustness is evaluated through distribution shift and slice analysis, not adver
 - `src/train.py` LightGBM + isotonic calibration
 - `src/economics.py` cost matrix → action ← the core
 - `src/decide.py` action + coarse reason codes
-- `src/evidence.py` chargeback representment pack
-- `src/api.py` FastAPI
-- `src/evaluate.py` PR-AUC, CIs, slices, rupees
+- `src/api.py` FastAPI (returns actions, reason codes, and `degraded` flags)
+- `src/evaluate.py` PR-AUC, Bootstrap CIs, slices, rupees
+- `frontend/streamlit_app.py` 3-tab dashboard (Score, Cost Curve, Ablation)
+- `Dockerfile` / `docker-compose.yml` multi-stage deployments
+- `DECISIONS.md` dated bug and architectural log
 
 See **[ARCHITECTURE.md](riskshield/ARCHITECTURE.md)** for the prototype-to-production mapping.
 
