@@ -12,23 +12,23 @@ The critical path is short on purpose. Anything that can move off it, does.
 
 ```mermaid
 graph TD
-    A[Client Request: POST /score] -->|Transaction Data| B(SERVING LAYER: FastAPI)
+    A["Client Request: POST /score"] -->|"Transaction Data"| B("SERVING LAYER: FastAPI")
     
     subgraph Online Fast Path
-        B -->|1. Validate schema| C[Pydantic]
-        C -->|2. Resolve Entity| D[entity.resolve -> uid]
-        D -->|3. Fetch O(1) state| E[(DATA LAYER: Redis/Dict)]
-        E -->|Features| F[LightGBM Model]
-        F -->|Raw Probability| G[Isotonic Calibration]
-        G -->|Calibrated Prob| H{Decision Engine: economics.py}
-        H -->|Action & Cost| I[Reason Codes]
+        B -->|"1. Validate schema"| C["Pydantic"]
+        C -->|"2. Resolve Entity"| D["entity.resolve -> uid"]
+        D -->|"3. Fetch O(1) state"| E[("DATA LAYER: Redis/Dict")]
+        E -->|"Features"| F["LightGBM Model"]
+        F -->|"Raw Probability"| G["Isotonic Calibration"]
+        G -->|"Calibrated Prob"| H{"Decision Engine: economics.py"}
+        H -->|"Action & Cost"| I["Reason Codes"]
     end
     
-    I -->|Response: action, reason, degraded| Out[Client Response < 50ms p99]
-    I -.->|8. Async state update| E
+    I -->|"Response: action, reason, degraded"| Out["Client Response < 50ms p99"]
+    I -.->|"8. Async state update"| E
     
-    E -.->|Log| J(ASYNC LAYER: Audit, Evidence Pack)
-    E -.->|Daily sync| K(BATCH LAYER: Parity Diff, Retrain)
+    E -.->|"Log"| J("ASYNC LAYER: Audit, Evidence Pack")
+    E -.->|"Daily sync"| K("BATCH LAYER: Parity Diff, Retrain")
 ```
 
 Step 8 runs **after** the response is formed. State updates never block a payment.
