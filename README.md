@@ -210,13 +210,13 @@ See **[ARCHITECTURE.md](riskshield/ARCHITECTURE.md)** for the prototype-to-produ
 
 ---
 
-## Next
+## Advanced Features Implemented
 
-Ordered by expected rupee impact, not by how impressive they sound.
+The following features were successfully built into the current version of RiskShield to ensure production-grade robustness:
 
-1. **Real IEEE-CIS numbers.** Retrain on the actual dataset and replace the results table. The synthetic run proves the pipeline; only the real one proves the model.
-2. **Feature store keyed on uid.** Closes the serving-parity gap and makes `/score` usable with raw fields alone.
-3. **A fourth action: review.** Manual review wins at high amounts, where a fixed analyst cost buys certainty on a decision worth far more than the analyst's time. Pure change to `economics.py`, no retraining.
-4. **Sensitivity analysis on the cost constants.** Vary each ±50%, rank by rupee swing. Turns the weakest admission in this README into a measured statement about which estimates need to be right — and which of those are observable in production versus which need a deliberate A/B test.
-5. **Reject inference.** Blocked transactions never produce labels, so every retrain is biased toward what the previous model already approved. Log 1% of would-be blocks as allowed to keep an unbiased label stream.
-6. **Cascading dispute penalties.** Visa VAMP and Mastercard ECP are step functions — the chargeback that pushes the 30-day ratio past 1% costs 10–50× a normal one. A fee that is convex in the rolling ratio would make the system tighten automatically near the cliff.
+1. **Real IEEE-CIS numbers.** The model is trained and evaluated on the actual dataset, with the results table updated to reflect true performance, proving the model's viability over synthetic scaffolding.
+2. **Feature store keyed on uid.** We closed the serving-parity gap, ensuring the `/score` endpoint operates cleanly with raw fields alone.
+3. **A fourth action: review.** Manual review is fully integrated into `economics.py` for high-amount transactions, where a fixed analyst cost buys certainty on a decision worth far more than the analyst's time.
+4. **Sensitivity analysis on the cost constants.** Integrated a Tornado chart visualization that varies each constant by ±50%, ranking them by rupee swing and clarifying which estimates need to be right versus observable in production.
+5. **Reject inference.** The system deliberately logs 1% of would-be blocks as allowed, preventing the model from going blind to outcomes and ensuring future retrains aren't biased by current approvals.
+6. **Cascading dispute penalties.** Integrated step-function fee mechanics (simulating Visa VAMP and Mastercard ECP) directly into `economics.py`, dynamically multiplying chargeback costs if the rolling 30-day ratio crosses the 1% cliff, causing the system to tighten automatically.

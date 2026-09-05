@@ -20,16 +20,21 @@ COST = {
     "margin": 0.20,          # merchant contribution margin on a good sale
     "stepup_abandon": 0.08,  # fraction of good users who drop at OTP
     "stepup_stops": 0.90,    # fraction of fraud 3DS blocks
+    "rolling_cb_ratio": 0.008, # rolling 30-day chargeback ratio (0.8%)
 }
 
 
 def expected_cost(p, amount, action, c=COST):
+    # Cascading dispute penalties: Visa VAMP / Mastercard ECP
+    # If ratio approaches 1%, fee multiplies by 10x
+    cb_fee = c["cb_fee"] * (10.0 if c.get("rolling_cb_ratio", 0) >= 0.01 else 1.0)
+    
     if action == "allow":
-        return p * (amount + c["cb_fee"])
+        return p * (amount + cb_fee)
     if action == "block":
         return (1 - p) * amount * c["margin"]
     if action == "stepup":
-        return (p * (1 - c["stepup_stops"]) * (amount + c["cb_fee"])
+        return (p * (1 - c["stepup_stops"]) * (amount + cb_fee)
                 + (1 - p) * amount * c["margin"] * c["stepup_abandon"]
                 + c["stepup_opex"])
     if action == "review":
