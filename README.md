@@ -25,7 +25,7 @@ Fraud is a pricing problem. We built a 4-Action economic engine that calculates 
 
 Track 02 asked for an evidence responder. While most teams stopped at a fraud score, RiskShield automates the post-fraud dispute lifecycle.
 
-Our `evidence.py` engine calculates the ROI of fighting a dispute and auto-generates a `rebuttal_pack.json` for winning cases.
+Explain how `evidence.py` calculates the ROI of fighting a dispute and auto-generates a `rebuttal_pack.json` for winning cases.
 
 ## Section 4: The Hiring Hook (Production Migration Plan)
 
